@@ -261,6 +261,7 @@ export function renderXtfDevicePreview(
   const owners = new Int16Array(width * height);
   owners.fill(-1);
   const collisionRows = new Set<number>();
+  const missingCodePoints = new Set<number>();
   const left = margin;
   const right = width - margin;
   const bottom = height - margin;
@@ -268,6 +269,7 @@ export function renderXtfDevicePreview(
   let penY = margin;
   let lineIndex = 0;
   let lineCount = penY + xtf.header.cellH <= bottom ? 1 : 0;
+  const lineTops = lineCount ? [penY] : [];
 
   const nextLine = (paragraph = false) => {
     const nextY = penY + linePitch + (paragraph ? paragraphExtra : 0);
@@ -275,6 +277,7 @@ export function renderXtfDevicePreview(
     penY = nextY;
     lineIndex += 1;
     lineCount += 1;
+    lineTops.push(penY);
     penX = left + (paragraph ? firstLineIndent : 0);
     return true;
   };
@@ -288,6 +291,9 @@ export function renderXtfDevicePreview(
     const cp = character.codePointAt(0);
     if (cp === undefined) continue;
     const glyphId = glyphIdForCodePoint(xtf, cp);
+    if (glyphId === null && !/\s/u.test(character)) {
+      missingCodePoints.add(cp);
+    }
     const record =
       glyphId === null
         ? null
@@ -352,6 +358,9 @@ export function renderXtfDevicePreview(
       height,
       lineCount,
       inkCollisionRows: collisionRows.size,
+      lineTops,
+      contentBounds: { left, top: margin, right, bottom },
+      missingCodePoints: [...missingCodePoints].sort((a, b) => a - b),
     },
   };
 }

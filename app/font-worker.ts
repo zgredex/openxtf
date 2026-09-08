@@ -63,6 +63,14 @@ export type FontPreviewResult = {
     height: number;
     lineCount: number;
     inkCollisionRows: number;
+    lineTops?: number[];
+    contentBounds?: {
+      left: number;
+      top: number;
+      right: number;
+      bottom: number;
+    };
+    missingCodePoints?: number[];
   } | null;
 };
 

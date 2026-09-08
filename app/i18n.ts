@@ -1,5 +1,8 @@
 export type Language = 'ko' | 'en';
 
+const koNumber = (value: number) => value.toLocaleString('ko-KR');
+const enNumber = (value: number) => value.toLocaleString('en-US');
+
 export const TRANSLATIONS = {
   ko: {
     primaryNavigation: '기본 탐색',
@@ -8,37 +11,40 @@ export const TRANSLATIONS = {
     switchToLight: '라이트 모드로 전환',
     switchToDark: '다크 모드로 전환',
     brandSubtitle: '기기를 위한 활자 공방',
+    workflowLabel: 'XTF 만들기 단계',
+    workflowSteps: ['글꼴 선택', '미리보기 확인', 'XTF 생성'],
     mainFont: '글꼴 소스',
-    pickFont: '폰트 선택…',
+    pickFont: '글꼴 선택…',
     local: '로컬',
     upload: '업로드',
-    loadedFont: (name: string) => `불러온 폰트: ${name}`,
-    readyFonts: '바로 선택할 수 있는 폰트',
+    loadedFont: (name: string) => `불러온 글꼴: ${name}`,
+    readyFonts: '바로 선택할 수 있는 글꼴',
     readyFontsHint: '업로드하지 않고 바로 사용할 수 있습니다.',
     defaultReadyFont: '기본',
+    readyFontName: 'RIDI바탕',
     loadingReadyFont: 'RIDI바탕 불러오는 중…',
     readyFontError:
-      '내장 RIDI바탕 폰트를 불러올 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.',
+      '내장 RIDI바탕 글꼴을 불러올 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.',
     supplementalFonts: '대체 글꼴',
     clearAll: '모두 지우기',
     supplementalFontHint:
-      '기본 폰트에 없는 문자는 보조 폰트를 사용해 자동으로 표시합니다.',
+      '기본 글꼴에 없는 문자는 대체 글꼴을 사용해 자동으로 표시합니다.',
     missingWarning: (count: number) =>
-      `기본 폰트와 보조 폰트에서 아직 지원되지 않는 문자 ${count}개는 제외됩니다. 다음 문자를 포함하는 보조 폰트를 업로드하거나 불러오세요:`,
+      `기본 글꼴과 대체 글꼴에서 아직 지원되지 않는 문자 ${koNumber(count)}개는 제외됩니다. 다음 문자를 포함하는 대체 글꼴을 업로드하거나 불러오세요:`,
     systemFallbackOn:
-      '시스템 폰트 대체가 켜져 있어 위 문자는 브라우저의 시스템 폰트로 폰트 파일에 렌더링됩니다.',
+      '시스템 글꼴 대체가 켜져 있어 위 문자는 브라우저의 시스템 글꼴로 글꼴 파일에 렌더링됩니다.',
     removeFont: (name: string) => `${name} 삭제`,
-    addSupplementalFonts: '보조 폰트 추가',
+    addSupplementalFonts: '대체 글꼴 추가',
     conversionSettings: '글자 모양',
     typographyProfile: '타이포그래피 프로필',
     koreanReadingProfile: '한국어 독서',
     standardProfile: '표준 XTFont',
     koreanProfileHint:
-      'RIDI바탕 기준의 38px 래스터, 39×38 셀, 2bpp, 9px 단어 간격과 38/45/53px 줄 간격 체계를 기본으로 사용합니다.',
+      'RIDI바탕 기준의 38px 래스터, 39×38 셀, 2bpp와 9px 단어 간격을 기본으로 사용합니다. 값은 아래에서 조정할 수 있습니다.',
     standardProfileHint:
       '공식 XTFont Maker와 동일한 자동 측정 및 직렬화 동작을 사용합니다.',
     outputFormat: '출력 형식',
-    fontSize: '폰트 크기',
+    fontSize: '글꼴 크기',
     rasterSize: '래스터 크기',
     rasterSizeHint:
       '38px는 한국어 독서 프로필의 기준 래스터 크기입니다. 셀 크기와 별도로 원본 글리프를 래스터화할 때 사용됩니다.',
@@ -95,9 +101,9 @@ export const TRANSLATIONS = {
       'BIN 파일에 저장되는 셀 너비를 조정합니다. 양수는 자간을 넓히고 음수는 좁히며, 너무 많이 줄이면 획이 잘릴 수 있습니다.',
     xtfSpacingHint:
       '글리프별 가로 간격을 픽셀 단위로 조정합니다. 양수는 넓히고 음수는 글리프가 겹치지 않는 범위에서 좁힙니다.',
-    systemFontFallback: '시스템 폰트 대체',
+    systemFontFallback: '시스템 글꼴 대체',
     systemFontFallbackHint:
-      '기본 폰트와 보조 폰트에 없는 문자는 브라우저의 시스템 폰트로 렌더링합니다. 기본 폰트와 모양이 다를 수 있습니다.',
+      '기본 글꼴과 대체 글꼴에 없는 문자는 브라우저의 시스템 글꼴로 렌더링합니다. 기본 글꼴과 모양이 다를 수 있습니다.',
     bmpOnly: ' BMP 문자만 지원합니다.',
     outputFilenamePattern: '출력 파일 이름 형식',
     placeholders:
@@ -111,9 +117,9 @@ export const TRANSLATIONS = {
       '2bpp는 네 단계 회색조를 사용해 글자 가장자리를 더 부드럽게 표현합니다.',
     characterRange: '문자 범위',
     deviceSet: '기기 문자 세트',
-    fullFont: '전체 폰트',
+    fullFont: '전체 글꼴',
     fullFontHint:
-      '기본 폰트의 cmap에 포함된 모든 문자를 생성합니다. 시간과 메모리가 훨씬 더 많이 필요합니다.',
+      '기본 글꼴의 cmap에 포함된 모든 문자를 생성합니다. 시간과 메모리가 훨씬 더 많이 필요합니다.',
     deviceSetHint:
       'X4 기본 문자 세트와 추가 문자만 생성합니다. 출력이 작고 모바일에서 더 안정적입니다.',
     renderTuning: '렌더링 조정',
@@ -131,7 +137,16 @@ export const TRANSLATIONS = {
     generating: '생성 중',
     generate: '생성',
     building: (size: number) => `생성 중 1/1: ${size}px`,
-    generatedSuccess: '폰트 파일 1개를 생성했습니다. 아래에서 다운로드하세요.',
+    generatedSuccess: '글꼴 파일 1개를 생성했습니다. 아래에서 다운로드하세요.',
+    currentSettings: '현재 생성 설정',
+    summaryFont: '글꼴',
+    summaryRaster: '래스터',
+    summaryCell: '셀',
+    summaryDepth: '비트 심도',
+    summaryRange: '문자 범위',
+    summaryOutput: '출력',
+    automatic: '자동',
+    notSelected: '선택 전',
     previewText: '읽기 미리보기',
     loadEpub: 'EPUB 불러오기',
     loadingEpub: 'EPUB 읽는 중…',
@@ -147,11 +162,22 @@ export const TRANSLATIONS = {
     updatingPreview: '미리보기 업데이트 중',
     deviceLayout: '기기 레이아웃',
     enlarge: '크게 보기',
-    fontPreview: '폰트 미리보기',
-    previewNoFont: '폰트를 불러오면 실시간 미리보기가 여기에 표시됩니다.',
-    previewLoading: '폰트를 불러와 미리보기를 렌더링하는 중…',
-    previewFailed: '미리보기를 만들 수 없습니다. 폰트 파일이나 미리보기 텍스트를 확인하세요.',
+    fontPreview: '글꼴 미리보기',
+    previewNoFont: '글꼴을 불러오면 실시간 미리보기가 여기에 표시됩니다.',
+    previewLoading: '글꼴을 불러와 미리보기를 렌더링하는 중…',
+    previewFailed: '미리보기를 만들 수 없습니다. 글꼴 파일이나 미리보기 텍스트를 확인하세요.',
     clickToEnlarge: '미리보기를 클릭하거나 탭하여 크게 보기',
+    previewDiagnostics: '미리보기 진단',
+    showDiagnostics: '진단 표시',
+    hideDiagnostics: '진단 숨기기',
+    diagnosticsHint:
+      '최종 글리프 데이터에서 계산한 정보입니다. 진단 표시는 XTF 출력에 영향을 주지 않습니다.',
+    diagnosticLines: '표시된 줄',
+    diagnosticPitch: '줄 중심 간격',
+    diagnosticCell: '글리프 셀',
+    diagnosticSpace: '단어 간격',
+    diagnosticCollision: '줄 간 잉크 충돌',
+    diagnosticMissing: '미표시 문자',
     previewDetails: (
       format: 'XTF' | 'BIN',
       lines: number,
@@ -173,30 +199,30 @@ export const TRANSLATIONS = {
     supplementalCharacters: '포함할 문자',
     chars: '자',
     characterSummary: (defaults: number, extras: number, total: number) =>
-      `기본 ${defaults}자, 추가 ${extras}자, 보조 문자 총 ${total}자. 탭하여 보거나 편집하세요.`,
+      `기본 ${koNumber(defaults)}자, 추가 ${koNumber(extras)}자, 보조 문자 총 ${koNumber(total)}자. 탭하여 보거나 편집하세요.`,
     defaultSupplementalCharacters: '기본 보조 문자',
     defaultCharactersHint: (count: number) =>
-      `기본으로 보조 문자 ${count}자를 사용합니다. 탭하여 전체 목록을 확인하세요.`,
+      `기본으로 보조 문자 ${koNumber(count)}자를 사용합니다. 탭하여 전체 목록을 확인하세요.`,
     extraSupplementalCharacters: '추가 보조 문자',
     extraCharactersPlaceholder:
       '선택 사항. 기본 보조 문자 세트 외에 반드시 포함할 문자를 입력하세요.',
-    extraCharacterCount: (count: number) => `추가 문자 ${count}자`,
+    extraCharacterCount: (count: number) => `추가 문자 ${koNumber(count)}자`,
     characterModeHint:
-      '기기 문자 세트 모드는 기본 세트와 추가 문자를 생성합니다. 전체 폰트 모드는 기본 폰트의 cmap도 합칩니다. 줄바꿈은 무시하고 공백은 유지합니다.',
+      '기기 문자 세트 모드는 기본 세트와 추가 문자를 생성합니다. 전체 글꼴 모드는 기본 글꼴의 cmap도 합칩니다. 줄바꿈은 무시하고 공백은 유지합니다.',
     results: '내보내기',
-    fileCount: (count: number) => `파일 ${count}개`,
+    fileCount: (count: number) => `파일 ${koNumber(count)}개`,
     noOutput: '아직 출력 없음',
     legacySummary: (slots: number | undefined, glyphs: number) =>
-      `고정 슬롯 ${slots ?? 0}개 · 사용 가능한 글리프 ${glyphs}개`,
+      `고정 슬롯 ${koNumber(slots ?? 0)}개 · 사용 가능한 글리프 ${koNumber(glyphs)}개`,
     xtfSummary: (glyphs: number, ranges: number) =>
-      `글리프 ${glyphs}개 · 범위 ${ranges}개`,
+      `글리프 ${koNumber(glyphs)}개 · 범위 ${koNumber(ranges)}개`,
     download: '다운로드',
     cell: '셀',
     bytesPerGlyph: '글리프당 바이트',
     missing: '누락',
     resultBitDepth: '비트 심도',
     sourceCell: '변환 전 셀',
-    resultsEmpty: '폰트를 선택하고 생성하세요. 출력 파일이 여기에 표시됩니다.',
+    resultsEmpty: '글꼴을 선택하고 생성하세요. 출력 파일이 여기에 표시됩니다.',
     rightsNotice: '권리 확인 안내',
     generationRights:
       '업로드한 자료를 사용할 적법한 권리가 있는지 확인하세요. 생성된 폰트는 기존 폰트나 저작물과 유사할 수 있습니다. OpenXTF는 생성 결과의 상업적 이용 가능 여부나 제3자의 권리를 침해하지 않는다는 점을 보증하지 않습니다. 상업적으로 사용할 경우 관련 권한을 직접 확인하고 그에 따른 책임을 부담해야 합니다.',
@@ -204,30 +230,30 @@ export const TRANSLATIONS = {
       '업로드한 자료를 사용할 적법한 권리가 있는지 확인하세요. 생성된 폰트는 창작 도구의 결과일 뿐입니다. OpenXTF는 상업적으로 사용할 수 있거나 제3자의 권리를 침해하지 않는다는 점을 보증하지 않습니다. 생성된 폰트를 상업적 목적, 공개 배포 또는 기타 외부 배포에 사용할 경우 관련 권한을 직접 확인하고 그에 따른 책임을 부담해야 합니다.',
     cancel: '취소',
     confirm: '확인',
-    enlargedTitle: '폰트 미리보기 · 크게 보기',
+    enlargedTitle: '글꼴 미리보기 · 크게 보기',
     zoomHint:
       '스크롤하거나 손가락을 모아 확대·축소하고, 드래그하거나 방향키로 이동하세요. Esc를 누르면 닫힙니다. 확대 비율은 레이아웃에 영향을 주지 않습니다.',
-    chooseFontError: 'TTF / OTF / TTC / OTC 폰트 파일을 선택하세요.',
-    unsupportedFallbacks: '지원하지 않는 보조 폰트 파일은 제외했습니다.',
+    chooseFontError: 'TTF / OTF / TTC / OTC 글꼴 파일을 선택하세요.',
+    unsupportedFallbacks: '지원하지 않는 대체 글꼴 파일은 제외했습니다.',
     defaultCharactersError: '기본 문자 세트를 불러올 수 없습니다.',
     invalidFontError:
-      '폰트 파일을 해석할 수 없습니다. 완전한 원본 TTF / OTF / TTC / OTC 폰트 파일을 선택하세요.',
+      '글꼴 파일을 해석할 수 없습니다. 완전한 원본 TTF / OTF / TTC / OTC 글꼴 파일을 선택하세요.',
     fontRequiredError:
-      '먼저 TTF / OTF / TTC / OTC 폰트 파일을 선택하세요.',
+      '먼저 TTF / OTF / TTC / OTC 글꼴 파일을 선택하세요.',
     noGlyphsError:
-      '선택한 폰트에는 현재 문자 범위에서 변환할 수 있는 글리프가 없습니다. 문자 범위나 보조 폰트를 확인하세요.',
+      '선택한 글꼴에는 현재 문자 범위에서 변환할 수 있는 글리프가 없습니다. 문자 범위나 대체 글꼴을 확인하세요.',
     invalidThresholdsError:
       '회색조 임계값은 0~255 사이 숫자 세 개여야 하며 t0 ≤ t1 ≤ t2 순서여야 합니다.',
     fontLoadTimeoutError:
-      '폰트를 불러오는 데 시간이 너무 오래 걸렸습니다. 폰트 파일을 확인한 뒤 다시 시도하세요.',
+      '글꼴을 불러오는 데 시간이 너무 오래 걸렸습니다. 글꼴 파일을 확인한 뒤 다시 시도하세요.',
     legacyBinError:
       '레거시 BIN 데이터를 처리할 수 없습니다. 셀 크기와 입력 파일을 확인하세요.',
     freeTypeError:
-      'FreeType 폰트 엔진을 불러올 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.',
-    workerError: '이 브라우저에서는 로컬 폰트 렌더링 워커를 시작할 수 없습니다.',
-    generationError: '폰트 생성에 실패했습니다.',
+      'FreeType 글꼴 엔진을 불러올 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.',
+    workerError: '이 브라우저에서는 로컬 글꼴 렌더링 워커를 시작할 수 없습니다.',
+    generationError: '글꼴 생성에 실패했습니다.',
     cropInkError:
-      '39×38 목표 셀로 자르면 글리프 잉크가 손실됩니다. 자르기 위치나 셀 크기를 조정하거나 잉크 손실 방지를 끄세요.',
+      '설정한 대상 셀로 자르면 글리프 잉크가 손실됩니다. 자르기 위치나 셀 크기를 조정하거나 잉크 손실 방지를 끄세요.',
     fontAttribution:
       '이 페이지는 리디주식회사에서 제공한 리디바탕 폰트를 사용합니다.',
   },
@@ -238,6 +264,8 @@ export const TRANSLATIONS = {
     switchToLight: 'Switch to light mode',
     switchToDark: 'Switch to dark mode',
     brandSubtitle: 'Type workshop for devices',
+    workflowLabel: 'XTF creation steps',
+    workflowSteps: ['Choose font', 'Check preview', 'Generate XTF'],
     mainFont: 'Font source',
     pickFont: 'Pick a font…',
     local: 'Local',
@@ -246,6 +274,7 @@ export const TRANSLATIONS = {
     readyFonts: 'Ready-to-pick fonts',
     readyFontsHint: 'Use these fonts immediately without uploading a file.',
     defaultReadyFont: 'Default',
+    readyFontName: 'RIDI Batang',
     loadingReadyFont: 'Loading RIDI Batang…',
     readyFontError:
       'The bundled RIDI Batang font could not load. Refresh the page and try again.',
@@ -361,6 +390,15 @@ export const TRANSLATIONS = {
     generate: 'Generate',
     building: (size: number) => `Building 1/1: ${size}px`,
     generatedSuccess: 'Generated 1 font file. Download it below.',
+    currentSettings: 'Current build settings',
+    summaryFont: 'Font',
+    summaryRaster: 'Raster',
+    summaryCell: 'Cell',
+    summaryDepth: 'Bit depth',
+    summaryRange: 'Character range',
+    summaryOutput: 'Output',
+    automatic: 'Automatic',
+    notSelected: 'Not selected',
     previewText: 'Reading preview',
     loadEpub: 'Load EPUB',
     loadingEpub: 'Reading EPUB…',
@@ -381,6 +419,17 @@ export const TRANSLATIONS = {
     previewLoading: 'Loading font and rendering preview…',
     previewFailed: 'Preview failed. Check the font file or preview text.',
     clickToEnlarge: 'Click or tap the preview to enlarge',
+    previewDiagnostics: 'Preview diagnostics',
+    showDiagnostics: 'Show diagnostics',
+    hideDiagnostics: 'Hide diagnostics',
+    diagnosticsHint:
+      'Calculated from the final glyph data. Showing diagnostics does not change the XTF output.',
+    diagnosticLines: 'Visible lines',
+    diagnosticPitch: 'Line-centre pitch',
+    diagnosticCell: 'Glyph cell',
+    diagnosticSpace: 'Word space',
+    diagnosticCollision: 'Cross-line ink collision',
+    diagnosticMissing: 'Unrendered characters',
     previewDetails: (
       format: 'XTF' | 'BIN',
       lines: number,
@@ -400,25 +449,25 @@ export const TRANSLATIONS = {
     ) =>
       `Rendered from final XTF cells with the X4 V6.3.15 path: ${lines} line(s), ${pitch} px pitch, ${space} px word space, ${collisions} px of cross-line ink collision.`,
     supplementalCharacters: 'Character set',
-    chars: 'chars',
+    chars: ' chars',
     characterSummary: (defaults: number, extras: number, total: number) =>
-      `${defaults} default, ${extras} extra; ${total} supplemental characters total. Tap to view or edit.`,
+      `${enNumber(defaults)} default, ${enNumber(extras)} extra; ${enNumber(total)} supplemental characters total. Tap to view or edit.`,
     defaultSupplementalCharacters: 'Default supplemental characters',
     defaultCharactersHint: (count: number) =>
-      `${count} supplemental characters are used by default. Tap to view the full list.`,
+      `${enNumber(count)} supplemental characters are used by default. Tap to view the full list.`,
     extraSupplementalCharacters: 'Extra supplemental characters',
     extraCharactersPlaceholder:
       'Optional. Enter characters to force-include beyond the default supplemental set.',
-    extraCharacterCount: (count: number) => `${count} extra character(s)`,
+    extraCharacterCount: (count: number) => `${enNumber(count)} extra character(s)`,
     characterModeHint:
       'Device-set mode generates the default set and extra characters. Full-font mode also merges the main font cmap. Line breaks are ignored and spaces are preserved.',
     results: 'Exports',
-    fileCount: (count: number) => `${count} file(s)`,
+    fileCount: (count: number) => `${enNumber(count)} file(s)`,
     noOutput: 'No output yet',
     legacySummary: (slots: number | undefined, glyphs: number) =>
-      `${slots ?? 0} fixed slots · ${glyphs} available glyphs`,
+      `${enNumber(slots ?? 0)} fixed slots · ${enNumber(glyphs)} available glyphs`,
     xtfSummary: (glyphs: number, ranges: number) =>
-      `${glyphs} glyphs · ${ranges} ranges`,
+      `${enNumber(glyphs)} glyphs · ${enNumber(ranges)} ranges`,
     download: 'Download',
     cell: 'Cell',
     bytesPerGlyph: 'Bytes/glyph',
@@ -456,7 +505,7 @@ export const TRANSLATIONS = {
     workerError: 'This browser cannot start the local font rendering worker.',
     generationError: 'Font generation failed.',
     cropInkError:
-      'The 39×38 target would remove glyph ink. Adjust the crop position or cell size, or turn off ink protection.',
+      'The selected target cell would remove glyph ink. Adjust the crop position or cell size, or turn off ink protection.',
     fontAttribution:
       'This page uses the Ridi Batang font provided by Ridi Corporation.',
   },

@@ -134,6 +134,7 @@ export default function OpenXtfClient() {
   const [dark, setDark] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [enlarged, setEnlarged] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [language, setLanguage] = useState<Language>('ko');
   const copy = TRANSLATIONS[language];
@@ -226,7 +227,7 @@ export default function OpenXtfClient() {
     document.documentElement.lang = language;
     document.title =
       language === 'ko'
-        ? 'OpenXTF — XT 폰트 만들기'
+        ? 'OpenXTF — XT 글꼴 만들기'
         : 'OpenXTF — XT Font Maker';
   }, [language]);
 
@@ -592,6 +593,29 @@ export default function OpenXtfClient() {
   const previewStatus = !font
     ? copy.previewNoFont
     : previewError || copy.previewLoading;
+  const previewReady = Boolean(preview?.dataUrl && !previewLoading);
+  const workflowProgress = results.length
+    ? 3
+    : previewReady
+      ? 2
+      : font
+        ? 1
+        : 0;
+  const summaryCell = koreanProfileActive
+    ? `${koreanSettings.cellW}×${koreanSettings.cellH}`
+    : preview?.metrics
+      ? `${preview.metrics.cellW}×${preview.metrics.cellH}`
+      : copy.automatic;
+  const summaryFont = font
+    ? font.name.replace(/\.(ttf|otf|ttc|otc)$/i, '')
+    : copy.notSelected;
+  const previewMissingCodePoints = preview?.device?.missingCodePoints ?? [];
+  const previewMissingSample = previewMissingCodePoints
+    .slice(0, 12)
+    .map((codePoint) => String.fromCodePoint(codePoint))
+    .join(' ');
+  const diagnosticDevice = preview?.device ?? null;
+  const diagnosticMetrics = preview?.metrics ?? null;
 
   return (
     <div className="app-shell min-h-screen">
@@ -622,6 +646,27 @@ export default function OpenXtfClient() {
           </button>
         </nav>
       </header>
+
+      <nav className="workflow-strip" aria-label={copy.workflowLabel}>
+        <ol>
+          {copy.workflowSteps.map((step, index) => {
+            const stepNumber = index + 1;
+            const complete = stepNumber <= workflowProgress;
+            const current =
+              workflowProgress < 3 && stepNumber === workflowProgress + 1;
+            return (
+              <li
+                className={`${complete ? 'is-complete' : ''} ${current ? 'is-current' : ''}`}
+                aria-current={current ? 'step' : undefined}
+                key={step}
+              >
+                <span>{stepNumber}</span>
+                <strong>{step}</strong>
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
 
       <main id="workspace" className="studio-main">
         <div className="studio-grid">
@@ -677,7 +722,7 @@ export default function OpenXtfClient() {
                     >
                       <span className="file-icon">R</span>
                       <span className="min-w-0 flex-1 text-left">
-                        <strong>{loading ? copy.loadingReadyFont : readyFont.name}</strong>
+                        <strong>{loading ? copy.loadingReadyFont : copy.readyFontName}</strong>
                         <small>OpenType · OTF</small>
                       </span>
                       <span className="local-badge">{copy.defaultReadyFont}</span>
@@ -1007,30 +1052,32 @@ export default function OpenXtfClient() {
                 </span>
               </label>
 
-              <label className="block space-y-1.5">
-                                              <span className="field-label">{copy.outputFilenamePattern}</span>
-                <input
-                  className="input"
-                  type="text"
-                  value={fileNamePattern}
-                  onChange={(event) => setFileNamePattern(event.target.value)}
-                />
-                <span className="hint">{copy.placeholders}</span>
-              </label>
-
-              {format === 'xtf' ? (
-                <div className="advanced-shell">
-                  <button
-                    type="button"
-                    className="advanced-toggle"
-                    onClick={() => setAdvanced((value) => !value)}
-                  >
-                    <span>{copy.advanced}</span>
-                    <span className={advanced ? 'rotate' : ''}>⌄</span>
-                  </button>
-                  {advanced ? (
-                    <div className="advanced-content space-y-4">
-                      <p className="hint">{copy.advancedHint}</p>
+              <div className="advanced-shell">
+                <button
+                  type="button"
+                  className="advanced-toggle"
+                  onClick={() => setAdvanced((value) => !value)}
+                >
+                  <span>{copy.advanced}</span>
+                  <span className={advanced ? 'rotate' : ''}>⌄</span>
+                </button>
+                {advanced ? (
+                  <div className="advanced-content space-y-4">
+                    <p className="hint">{copy.advancedHint}</p>
+                    <label className="block space-y-1.5">
+                      <span className="field-label">
+                        {copy.outputFilenamePattern}
+                      </span>
+                      <input
+                        className="input"
+                        type="text"
+                        value={fileNamePattern}
+                        onChange={(event) => setFileNamePattern(event.target.value)}
+                      />
+                      <span className="hint">{copy.placeholders}</span>
+                    </label>
+                    {format === 'xtf' ? (
+                      <>
                       <div className="space-y-2">
                         <span className="field-label">{copy.bitDepth}</span>
                         <div className="grid grid-cols-2 gap-2">
@@ -1135,10 +1182,11 @@ export default function OpenXtfClient() {
                           />
                         )}
                       </div>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
             </section>
           </aside>
 
@@ -1170,6 +1218,32 @@ export default function OpenXtfClient() {
                 >
                   {building ? copy.generating : copy.generate}
                 </button>
+              </div>
+              <div className="build-summary" aria-label={copy.currentSettings}>
+                <div>
+                  <span>{copy.summaryFont}</span>
+                  <strong>{summaryFont}</strong>
+                </div>
+                <div>
+                  <span>{copy.summaryRaster}</span>
+                  <strong>{fontSize} px</strong>
+                </div>
+                <div>
+                  <span>{copy.summaryCell}</span>
+                  <strong>{summaryCell}</strong>
+                </div>
+                <div>
+                  <span>{copy.summaryDepth}</span>
+                  <strong>{actualBpp} bpp</strong>
+                </div>
+                <div>
+                  <span>{copy.summaryRange}</span>
+                  <strong>{actualScope === 'full' ? copy.fullFont : copy.deviceSet}</strong>
+                </div>
+                <div>
+                  <span>{copy.summaryOutput}</span>
+                  <strong>{format === 'xtf' ? '.xtf' : '.bin'}</strong>
+                </div>
               </div>
               {building ? (
                 <div className="space-y-2">
@@ -1219,6 +1293,16 @@ export default function OpenXtfClient() {
                       {copy.clearEpub}
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    className="secondary-btn compact-action"
+                    disabled={!preview?.device || !preview?.metrics}
+                    onClick={() => setShowDiagnostics((value) => !value)}
+                  >
+                    {showDiagnostics
+                      ? copy.hideDiagnostics
+                      : copy.showDiagnostics}
+                  </button>
                 </div>
               </div>
               {epubError ? <p className="error-message">{epubError}</p> : null}
@@ -1265,8 +1349,37 @@ export default function OpenXtfClient() {
                     }}
                   >
                     {/* The worker output is generated locally from the selected font. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={preview.dataUrl} alt={copy.fontPreview} />
+                    <span className="device-preview-sheet">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={preview.dataUrl} alt={copy.fontPreview} />
+                      {showDiagnostics &&
+                      diagnosticDevice?.contentBounds &&
+                      diagnosticDevice.lineTops?.length &&
+                      diagnosticMetrics ? (
+                        <span className="preview-diagnostic-overlay" aria-hidden="true">
+                          <span
+                            className="diagnostic-content-bounds"
+                            style={{
+                              left: `${(diagnosticDevice.contentBounds.left / diagnosticDevice.width) * 100}%`,
+                              top: `${(diagnosticDevice.contentBounds.top / diagnosticDevice.height) * 100}%`,
+                              width: `${((diagnosticDevice.contentBounds.right - diagnosticDevice.contentBounds.left) / diagnosticDevice.width) * 100}%`,
+                              height: `${((diagnosticDevice.contentBounds.bottom - diagnosticDevice.contentBounds.top) / diagnosticDevice.height) * 100}%`,
+                            }}
+                          />
+                          {diagnosticDevice.lineTops.map((lineTop, index) => (
+                            <span
+                              className="diagnostic-baseline"
+                              style={{
+                                top: `${((lineTop + diagnosticMetrics.contentBaseline) / diagnosticDevice.height) * 100}%`,
+                              }}
+                              key={`${lineTop}-${index}`}
+                            >
+                              {index + 1}
+                            </span>
+                          ))}
+                        </span>
+                      ) : null}
+                    </span>
                   </button>
                 ) : (
                   <div className="preview-empty">{previewStatus}</div>
@@ -1277,6 +1390,43 @@ export default function OpenXtfClient() {
                   </div>
                 ) : null}
               </div>
+              {showDiagnostics && preview?.device && preview.metrics ? (
+                <section className="preview-diagnostics-panel">
+                  <div>
+                    <p className="field-label">{copy.previewDiagnostics}</p>
+                    <p className="hint">{copy.diagnosticsHint}</p>
+                  </div>
+                  <dl>
+                    <div>
+                      <dt>{copy.diagnosticLines}</dt>
+                      <dd>{formatLocaleNumber(preview.device.lineCount, language)}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.diagnosticPitch}</dt>
+                      <dd>{preview.metrics.advanceY} px</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.diagnosticCell}</dt>
+                      <dd>{preview.metrics.cellW}×{preview.metrics.cellH}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.diagnosticSpace}</dt>
+                      <dd>{koreanProfileActive ? `${koreanSpaceWidth} px` : copy.automatic}</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.diagnosticCollision}</dt>
+                      <dd>{formatLocaleNumber(preview.device.inkCollisionRows, language)} px</dd>
+                    </div>
+                    <div>
+                      <dt>{copy.diagnosticMissing}</dt>
+                      <dd>
+                        {formatLocaleNumber(previewMissingCodePoints.length, language)}
+                        {previewMissingSample ? ` · ${previewMissingSample}` : ''}
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+              ) : null}
               {preview?.dataUrl && !previewLoading ? (
                 <p className="text-center text-xs leading-5 text-slate-500 dark:text-slate-400">
                   {copy.clickToEnlarge}
@@ -1312,7 +1462,7 @@ export default function OpenXtfClient() {
                     {copy.supplementalCharacters}
                   </span>
                   <span className="count-badge">
-                    {totalCharacterCount || 19_570}{copy.chars}
+                    {formatLocaleNumber(totalCharacterCount || 19_570, language)}{copy.chars}
                   </span>
                 </span>
                 <span className={charactersOpen ? 'rotate' : ''}>⌄</span>
@@ -1662,6 +1812,10 @@ function uniqueCodePointCount(text: string) {
       character.codePointAt(0),
     ),
   ).size;
+}
+
+function formatLocaleNumber(value: number, language: Language) {
+  return value.toLocaleString(language === 'ko' ? 'ko-KR' : 'en-US');
 }
 
 function applyOutputFileName(
