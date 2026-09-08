@@ -127,7 +127,7 @@ export const TRANSLATIONS = {
     workspaceCopy:
       '선택한 글꼴과 현재 설정으로 XT 기기용 파일을 만듭니다. 모든 처리는 이 브라우저 안에서만 이루어집니다.',
     koreanWorkspaceCopy:
-      '현재 글꼴을 39×38 독서 셀에 맞추고, 완성된 XTF 데이터로 실제 기기 미리보기를 구성합니다.',
+      '선택한 글꼴을 현재 XTF 설정으로 변환하고, 생성된 글리프 데이터로 기기 미리보기를 구성합니다.',
     generating: '생성 중',
     generate: '생성',
     building: (size: number) => `생성 중 1/1: ${size}px`,
@@ -356,7 +356,7 @@ export const TRANSLATIONS = {
     workspaceCopy:
       'Create an XT device font from the selected face and current settings. All processing stays inside this browser.',
     koreanWorkspaceCopy:
-      'Fit the current typeface to the 39×38 reading cell and compose the device preview from the finished XTF data.',
+      'Convert the selected typeface with the current XTF settings and compose the device preview from the generated glyph data.',
     generating: 'Generating',
     generate: 'Generate',
     building: (size: number) => `Building 1/1: ${size}px`,
