@@ -73,7 +73,7 @@ export const TRANSLATIONS = {
     descender: '디센더',
     effectiveWordSpace: '단어 간격(U+0020)',
     xtfMetricsHint:
-      'V6.3.15는 한글에 전각 너비를, ASCII에 글자별 너비 표를 사용합니다. U+0020 단어 간격은 그 표에 따로 저장됩니다. 줄 진행값은 advanceY이며, 0일 때만 셀 높이로 대체됩니다.',
+      'V6.3.15는 일반 한글을 한글·CJK 전각 너비로 배치하고, advanceY를 세로 줄 진행값으로 사용합니다(0일 때만 셀 높이로 대체). U+0020 단어 간격은 한국어 문장의 띄어쓰기에 직접 영향을 줍니다.',
     protectInk: '잉크 손실 방지',
     protectInkHint:
       '목표 셀로 자를 때 글리프 픽셀이 하나라도 사라지면 생성을 중단합니다.',
@@ -324,7 +324,7 @@ export const TRANSLATIONS = {
     descender: 'Descender',
     effectiveWordSpace: 'Word space (U+0020)',
     xtfMetricsHint:
-      'V6.3.15 uses fullWidth for Hangul and a per-character table for ASCII. U+0020 has its own stored entry. Vertical line advance comes from advanceY, falling back to cell height only when advanceY is zero.',
+      'V6.3.15 places ordinary Hangul using the Hangul/CJK full width and uses advanceY as the vertical line advance (falling back to cell height only when zero). The U+0020 word space directly affects Korean text layout.',
     protectInk: 'Protect glyph ink',
     protectInkHint:
       'Stop generation if reframing into the target cell would remove even one nonblank glyph pixel.',

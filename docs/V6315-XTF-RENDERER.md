@@ -88,6 +88,14 @@ but are not shown as normal Korean text controls. The V6.3.15 font loader scans
 sample glyph bitmaps to derive the normal-text ink bounds used by the reader
 (`FUN_420426fc`, getters `FUN_42042466` and `FUN_42042482`).
 
+In the Korean reading profile, OpenXTF also hides `asciiWidth` and the generic
+per-glyph letter-spacing control. The firmware does not use either value for
+ordinary Hangul: `asciiWidth` is an ASCII fallback/tab metric, while Hangul
+uses the header `fullWidth` instead of per-glyph advances. Both compatibility
+values remain valid internally and the Standard XTFont profile still exposes
+the generic letter-spacing control. U+0020 remains visible because its ASCII
+table entry directly controls spaces inside Korean text.
+
 ## Korean default calibration
 
 The KO reference font was generated as 14 pt at 150 DPI, which is about

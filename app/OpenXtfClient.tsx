@@ -924,15 +924,6 @@ export default function OpenXtfClient() {
                         onChange={(value) => updateKoreanSetting('fullWidth', value)}
                       />
                       <NumberField
-                        label={copy.asciiMeanWidth}
-                        value={koreanSettings.asciiWidth}
-                        min={1}
-                        max={255}
-                        step={1}
-                        suffix="px"
-                        onChange={(value) => updateKoreanSetting('asciiWidth', value)}
-                      />
-                      <NumberField
                         label={copy.effectiveWordSpace}
                         value={koreanSettings.spaceWidth}
                         min={1}
@@ -1020,20 +1011,22 @@ export default function OpenXtfClient() {
                 />
               )}
 
-              <RangeField
-                label={copy.letterSpacing}
-                value={`${letterSpacing > 0 ? '+' : ''}${letterSpacing} px`}
-                min={-12}
-                max={16}
-                step={1}
-                number={letterSpacing}
-                onChange={setLetterSpacing}
-                hint={
-                  format === 'legacy-bin'
-                    ? copy.binSpacingHint
-                    : copy.xtfSpacingHint
-                }
-              />
+              {!koreanProfileActive ? (
+                <RangeField
+                  label={copy.letterSpacing}
+                  value={`${letterSpacing > 0 ? '+' : ''}${letterSpacing} px`}
+                  min={-12}
+                  max={16}
+                  step={1}
+                  number={letterSpacing}
+                  onChange={setLetterSpacing}
+                  hint={
+                    format === 'legacy-bin'
+                      ? copy.binSpacingHint
+                      : copy.xtfSpacingHint
+                  }
+                />
+              ) : null}
 
               <label className="fallback-row">
                 <input
