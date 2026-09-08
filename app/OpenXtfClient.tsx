@@ -616,6 +616,63 @@ export default function OpenXtfClient() {
     .join(' ');
   const diagnosticDevice = preview?.device ?? null;
   const diagnosticMetrics = preview?.metrics ?? null;
+  const strokeControls =
+    format === 'xtf' ? (
+      <>
+        <div className="space-y-2 setting-help-host" title={copy.strokeDarknessHelp}>
+          <div className="flex items-center justify-between gap-3">
+            <SettingLabel
+              label={copy.strokeDarkness}
+              help={copy.strokeDarknessHelp}
+            />
+            {weight === 'custom' ? (
+              <span className="text-xs text-slate-400">({copy.custom})</span>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-5 gap-1">
+            {Object.keys(WEIGHT_PRESETS).map((name) => (
+              <button
+                key={name}
+                type="button"
+                className={`preset-button ${weight === name ? 'is-active' : ''}`}
+                onClick={() =>
+                  applyWeightPreset(name as keyof typeof WEIGHT_PRESETS)
+                }
+              >
+                {copy.weightPresets[name as keyof typeof WEIGHT_PRESETS]}
+              </button>
+            ))}
+          </div>
+          <p className="hint">{copy.strokeDarknessHint}</p>
+        </div>
+
+        <RangeField
+          label={copy.strokeWeight}
+          value={`${embolden.toFixed(2)} px`}
+          min={-3}
+          max={8}
+          step={0.25}
+          number={embolden}
+          onChange={(value) => {
+            setEmbolden(value);
+            setWeight('custom');
+          }}
+          hint={copy.strokeWeightHint}
+          tooltip={copy.strokeWeightHelp}
+        />
+      </>
+    ) : (
+      <RangeField
+        label={copy.bitmapThreshold}
+        value={String(binThreshold)}
+        min={0}
+        max={255}
+        step={1}
+        number={binThreshold}
+        onChange={setBinThreshold}
+        hint={copy.bitmapThresholdHint}
+      />
+    );
 
   return (
     <div className="app-shell min-h-screen">
@@ -842,23 +899,6 @@ export default function OpenXtfClient() {
                 </div>
               </fieldset>
 
-              <label className="block space-y-1.5">
-                <span className="field-label">
-                  {koreanProfileActive ? copy.rasterSize : copy.fontSize}
-                </span>
-                <input
-                  className="input"
-                  type="number"
-                  min={1}
-                  max={255}
-                  value={fontSize}
-                  onChange={(event) => setFontSize(Number(event.target.value))}
-                />
-                {koreanProfileActive ? (
-                  <span className="hint">{copy.rasterSizeHint}</span>
-                ) : null}
-              </label>
-
               {koreanProfileActive ? (
                 <div className="device-profile-panel space-y-4">
                   <div className="profile-summary">
@@ -866,9 +906,26 @@ export default function OpenXtfClient() {
                     <strong>{fontSize} px · {bpp} bpp</strong>
                   </div>
 
-                  <div>
-                    <p className="field-label mb-2">{copy.xtfDeviceMetrics}</p>
+                  <div className="appearance-heading">
+                    <p className="field-label">{copy.xtfDeviceMetrics}</p>
+                    <p className="hint">{copy.xtfMetricsHint}</p>
+                  </div>
+
+                  <section className="appearance-group">
+                    <p className="appearance-group-title">
+                      {copy.glyphSizeAndPosition}
+                    </p>
                     <div className="settings-grid">
+                      <NumberField
+                        label={copy.rasterSize}
+                        value={fontSize}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.rasterSizeHelp}
+                        onChange={setFontSize}
+                      />
                       <NumberField
                         label={copy.cellWidth}
                         value={koreanSettings.cellW}
@@ -876,6 +933,7 @@ export default function OpenXtfClient() {
                         max={255}
                         step={1}
                         suffix="px"
+                        help={copy.cellWidthHelp}
                         onChange={(value) => updateKoreanSetting('cellW', value)}
                       />
                       <NumberField
@@ -885,6 +943,7 @@ export default function OpenXtfClient() {
                         max={255}
                         step={1}
                         suffix="px"
+                        help={copy.cellHeightHelp}
                         onChange={(value) => updateKoreanSetting('cellH', value)}
                       />
                       <NumberField
@@ -894,6 +953,7 @@ export default function OpenXtfClient() {
                         max={64}
                         step={1}
                         suffix="px"
+                        help={copy.cropLeftHelp}
                         onChange={(value) => updateKoreanSetting('cropLeft', value)}
                       />
                       <NumberField
@@ -903,17 +963,39 @@ export default function OpenXtfClient() {
                         max={64}
                         step={1}
                         suffix="px"
+                        help={copy.cropTopHelp}
                         onChange={(value) => updateKoreanSetting('cropTop', value)}
                       />
-                      <NumberField
-                        label={copy.storedAdvanceY}
-                        value={koreanSettings.advanceY}
-                        min={1}
-                        max={255}
-                        step={1}
-                        suffix="px"
-                        onChange={(value) => updateKoreanSetting('advanceY', value)}
+                    </div>
+
+                    <label
+                      className="fallback-row compact-fallback-row setting-help-host"
+                      title={copy.protectInkHelp}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={koreanSettings.strictCrop}
+                        onChange={(event) =>
+                          updateKoreanSetting('strictCrop', event.target.checked)
+                        }
                       />
+                      <span>
+                        <strong className="field-label block">
+                          <SettingLabel
+                            label={copy.protectInk}
+                            help={copy.protectInkHelp}
+                          />
+                        </strong>
+                        <span className="hint block">{copy.protectInkHint}</span>
+                      </span>
+                    </label>
+                  </section>
+
+                  <section className="appearance-group">
+                    <p className="appearance-group-title">
+                      {copy.textSpacingAndRhythm}
+                    </p>
+                    <div className="settings-grid">
                       <NumberField
                         label={copy.fullWidthAdvance}
                         value={koreanSettings.fullWidth}
@@ -921,6 +1003,7 @@ export default function OpenXtfClient() {
                         max={255}
                         step={1}
                         suffix="px"
+                        help={copy.fullWidthAdvanceHelp}
                         onChange={(value) => updateKoreanSetting('fullWidth', value)}
                       />
                       <NumberField
@@ -930,85 +1013,44 @@ export default function OpenXtfClient() {
                         max={255}
                         step={1}
                         suffix="px"
+                        help={copy.wordSpaceHelp}
                         onChange={(value) => updateKoreanSetting('spaceWidth', value)}
                       />
+                      <NumberField
+                        label={copy.storedAdvanceY}
+                        value={koreanSettings.advanceY}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.advanceYHelp}
+                        onChange={(value) => updateKoreanSetting('advanceY', value)}
+                      />
                     </div>
-                    <p className="hint mt-2">{copy.xtfMetricsHint}</p>
-                  </div>
+                  </section>
 
-                  <label className="fallback-row compact-fallback-row">
-                    <input
-                      type="checkbox"
-                      checked={koreanSettings.strictCrop}
-                      onChange={(event) =>
-                        updateKoreanSetting('strictCrop', event.target.checked)
-                      }
-                    />
-                    <span>
-                      <strong className="field-label block">{copy.protectInk}</strong>
-                      <span className="hint block">{copy.protectInkHint}</span>
-                    </span>
-                  </label>
+                  <section className="appearance-group space-y-4">
+                    <p className="appearance-group-title">
+                      {copy.strokeAppearance}
+                    </p>
+                    {strokeControls}
+                  </section>
                 </div>
-              ) : null}
-
-              {format === 'xtf' ? (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="field-label">{copy.strokeDarkness}</span>
-                      {weight === 'custom' ? (
-                        <span className="text-xs text-slate-400">
-                          ({copy.custom})
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="grid grid-cols-5 gap-1">
-                      {Object.keys(WEIGHT_PRESETS).map((name) => (
-                        <button
-                          key={name}
-                          type="button"
-                          className={`preset-button ${weight === name ? 'is-active' : ''}`}
-                          onClick={() =>
-                            applyWeightPreset(name as keyof typeof WEIGHT_PRESETS)
-                          }
-                        >
-                          {
-                            copy.weightPresets[
-                              name as keyof typeof WEIGHT_PRESETS
-                            ]
-                          }
-                        </button>
-                      ))}
-                    </div>
-                    <p className="hint">{copy.strokeDarknessHint}</p>
-                  </div>
-
-                  <RangeField
-                    label={copy.strokeWeight}
-                    value={`${embolden.toFixed(2)} px`}
-                    min={-3}
-                    max={8}
-                    step={0.25}
-                    number={embolden}
-                    onChange={(value) => {
-                      setEmbolden(value);
-                      setWeight('custom');
-                    }}
-                    hint={copy.strokeWeightHint}
-                  />
-                </>
               ) : (
-                <RangeField
-                  label={copy.bitmapThreshold}
-                  value={String(binThreshold)}
-                  min={0}
-                  max={255}
-                  step={1}
-                  number={binThreshold}
-                  onChange={setBinThreshold}
-                  hint={copy.bitmapThresholdHint}
-                />
+                <>
+                  <label className="block space-y-1.5">
+                    <span className="field-label">{copy.fontSize}</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min={1}
+                      max={255}
+                      value={fontSize}
+                      onChange={(event) => setFontSize(Number(event.target.value))}
+                    />
+                  </label>
+                  {strokeControls}
+                </>
               )}
 
               {!koreanProfileActive ? (
@@ -1706,6 +1748,19 @@ function SegmentButton({
   );
 }
 
+function SettingLabel({ label, help }: { label: string; help?: string }) {
+  return (
+    <span className="setting-label">
+      <span className="setting-label-text">{label}</span>
+      {help ? (
+        <span className="setting-info" aria-hidden="true">
+          ?
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function RangeField({
   label,
   value,
@@ -1715,6 +1770,7 @@ function RangeField({
   number,
   onChange,
   hint,
+  tooltip,
 }: {
   label: string;
   value: string;
@@ -1724,12 +1780,18 @@ function RangeField({
   number: number;
   onChange: (value: number) => void;
   hint: string;
+  tooltip?: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div
+      className={`space-y-2 ${tooltip ? 'setting-help-host' : ''}`}
+      title={tooltip}
+    >
       {label || value ? (
         <div className="flex items-center justify-between gap-3">
-          <span className="field-label">{label}</span>
+          <span className="field-label">
+            <SettingLabel label={label} help={tooltip} />
+          </span>
           <span className="mono">{value}</span>
         </div>
       ) : null}
@@ -1754,6 +1816,7 @@ function NumberField({
   max,
   step,
   suffix,
+  help,
   onChange,
 }: {
   label: string;
@@ -1762,11 +1825,15 @@ function NumberField({
   max: number;
   step: number;
   suffix: string;
+  help?: string;
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="number-field">
-      <span>{label}</span>
+    <label
+      className={`number-field ${help ? 'setting-help-host' : ''}`}
+      title={help}
+    >
+      <SettingLabel label={label} help={help} />
       <span className="number-input-wrap">
         <input
           type="number"

@@ -98,10 +98,11 @@ table entry directly controls spaces inside Korean text.
 
 ## Korean default calibration
 
-The KO reference font was generated as 14 pt at 150 DPI, which is about
-29.17 pixels. Its compiled font data stores a 38 px line height, a 28 px
-ascender and a -9 px descender. XTF stores integer metrics, so the closest
-V6.3.15 profile is:
+The KO reference build converted its 14 pt source setting to a raster of about
+29.17 pixels. The build-time resolution used for that conversion is a FreeType
+rasterization parameter, not the physical pixel density of an X3 or X4 display.
+Its compiled font data stores a 38 px line height, a 28 px ascender and a -9 px
+descender. XTF stores integer metrics, so the closest V6.3.15 profile is:
 
 - raster size: 29 px;
 - bitmap cell: 39 × 38;

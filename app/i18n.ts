@@ -45,7 +45,7 @@ export const TRANSLATIONS = {
     fontSize: '글꼴 크기',
     rasterSize: '래스터 크기',
     rasterSizeHint:
-      '29px는 KO 포크의 14pt/150DPI 래스터와 가장 가까운 정수 픽셀 크기입니다. 39×38 저장 셀 및 38px 줄 진행값과는 별개입니다.',
+      '29px는 KO 포크 글꼴 비트맵에 맞춘 기본 래스터 크기입니다. 기기의 PPI를 뜻하지 않으며, 39×38 저장 셀 및 38px 줄 진행값과는 별개입니다.',
     referenceAppearance: '완성 XTF 래스터',
     deviceLineSpacing: '기기 줄 간격',
     lineTight: (pixels: number) => `좁게 · ${pixels}px`,
@@ -62,6 +62,9 @@ export const TRANSLATIONS = {
     deviceOnlySettingsHint:
       '이 값들은 기기/책 레이아웃을 재현하는 미리보기 설정입니다. XTF 파일에는 저장되지 않으므로 X4와 같은 값으로 맞추세요.',
     xtfDeviceMetrics: 'XTF 글꼴 모양 설정',
+    glyphSizeAndPosition: '글자 크기와 위치',
+    textSpacingAndRhythm: '글자와 줄 간격',
+    strokeAppearance: '획 모양',
     cellWidth: '셀 너비',
     cellHeight: '셀 높이',
     cropLeft: '왼쪽 자르기',
@@ -74,6 +77,15 @@ export const TRANSLATIONS = {
     effectiveWordSpace: '단어 간격(U+0020)',
     xtfMetricsHint:
       'V6.3.15는 일반 한글을 한글·CJK 전각 너비로 배치하고, advanceY를 세로 줄 진행값으로 사용합니다(0일 때만 셀 높이로 대체). U+0020 단어 간격은 한국어 문장의 띄어쓰기에 직접 영향을 줍니다.',
+    rasterSizeHelp: '원본 글꼴을 XTF 비트맵으로 그릴 때의 글자 크기입니다.',
+    cellWidthHelp: '각 글자의 비트맵을 저장하는 가로 픽셀 수입니다.',
+    cellHeightHelp: '각 글자의 비트맵을 저장하는 세로 픽셀 수입니다.',
+    cropLeftHelp: '양수는 셀 안의 글자를 왼쪽으로, 음수는 오른쪽으로 옮깁니다.',
+    cropTopHelp: '양수는 셀 안의 글자를 위로, 음수는 아래로 옮깁니다.',
+    advanceYHelp: 'XTF에 저장되는 기본 줄 기준선 간격입니다.',
+    fullWidthAdvanceHelp: '일반 한글 한 글자를 그린 뒤 다음 글자로 이동하는 거리입니다.',
+    wordSpaceHelp: '한국어 문장에서 띄어쓰기 한 칸의 실제 너비입니다.',
+    protectInkHelp: '셀 밖으로 글자 픽셀이 잘리는 설정을 실수로 생성하지 못하게 합니다.',
     protectInk: '잉크 손실 방지',
     protectInkHint:
       '목표 셀로 자를 때 글리프 픽셀이 하나라도 사라지면 생성을 중단합니다.',
@@ -88,9 +100,11 @@ export const TRANSLATIONS = {
     },
     strokeDarknessHint:
       '왼쪽에서 오른쪽으로 갈수록 글리프가 진해집니다. 회색조 분포에만 영향을 주며 글리프 모양은 바뀌지 않습니다.',
+    strokeDarknessHelp: '글자 가장자리의 회색 농도와 전체 대비를 선택합니다.',
     strokeWeight: '획 굵기',
     strokeWeightHint:
       '양수는 획을 굵게 하고, 음수는 비트맵 형태 연산으로 획을 가늘게 합니다.',
+    strokeWeightHelp: '글자 획 자체를 더 굵거나 가늘게 만듭니다.',
     bitmapThreshold: '비트맵 임계값',
     bitmapThresholdHint:
       '임계값보다 진한 픽셀만 유지합니다. 값이 낮을수록 획이 더 진해집니다.',
@@ -296,7 +310,7 @@ export const TRANSLATIONS = {
     fontSize: 'Font size',
     rasterSize: 'Raster size',
     rasterSizeHint:
-      '29 px is the closest integer raster to the KO fork’s 14 pt at 150 DPI. It is separate from the 39×38 storage cell and 38 px line advance.',
+      "29 px is the default raster calibrated to the KO fork's glyph bitmaps. It is not the device PPI and is separate from the 39×38 storage cell and 38 px line advance.",
     referenceAppearance: 'Finished XTF raster',
     deviceLineSpacing: 'Device line spacing',
     lineTight: (pixels: number) => `Tight · ${pixels} px`,
@@ -313,6 +327,9 @@ export const TRANSLATIONS = {
     deviceOnlySettingsHint:
       'These reproduce device/book layout in the preview. They are not stored in XTF, so use the same values on the X4.',
     xtfDeviceMetrics: 'XTF appearance controls',
+    glyphSizeAndPosition: 'Glyph size and position',
+    textSpacingAndRhythm: 'Text and line spacing',
+    strokeAppearance: 'Stroke appearance',
     cellWidth: 'Cell width',
     cellHeight: 'Cell height',
     cropLeft: 'Crop left',
@@ -325,6 +342,15 @@ export const TRANSLATIONS = {
     effectiveWordSpace: 'Word space (U+0020)',
     xtfMetricsHint:
       'V6.3.15 places ordinary Hangul using the Hangul/CJK full width and uses advanceY as the vertical line advance (falling back to cell height only when zero). The U+0020 word space directly affects Korean text layout.',
+    rasterSizeHelp: 'The size used to draw the source font into XTF bitmaps.',
+    cellWidthHelp: 'The horizontal pixel area stored for every glyph bitmap.',
+    cellHeightHelp: 'The vertical pixel area stored for every glyph bitmap.',
+    cropLeftHelp: 'Positive values move the glyph left; negative values move it right.',
+    cropTopHelp: 'Positive values move the glyph up; negative values move it down.',
+    advanceYHelp: 'The base distance between line baselines stored in the XTF.',
+    fullWidthAdvanceHelp: 'How far the firmware moves after drawing an ordinary Hangul glyph.',
+    wordSpaceHelp: 'The actual width of one word space in Korean text.',
+    protectInkHelp: 'Prevents creating a setting that clips glyph pixels outside the cell.',
     protectInk: 'Protect glyph ink',
     protectInkHint:
       'Stop generation if reframing into the target cell would remove even one nonblank glyph pixel.',
@@ -339,9 +365,11 @@ export const TRANSLATIONS = {
     },
     strokeDarknessHint:
       'Glyphs grow darker left to right. Only affects grayscale distribution, not glyph shape.',
+    strokeDarknessHelp: 'Chooses edge gray levels and the overall contrast of the text.',
     strokeWeight: 'Stroke weight',
     strokeWeightHint:
       'Positive values embolden, negative values thin strokes using bitmap morphology.',
+    strokeWeightHelp: 'Makes the actual glyph strokes thicker or thinner.',
     bitmapThreshold: 'Bitmap threshold',
     bitmapThresholdHint:
       'Only pixels with coverage above the threshold are kept. A lower threshold makes strokes darker.',
