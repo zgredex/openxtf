@@ -18,21 +18,21 @@
   --accent: #ae4a32;
   --accent-ink: #8f3825;
   --accent-soft: #f1ddd3;
-  --preview-mat: #302c27;
+  --preview-mat: #ded4c4;
 }
 
 .dark {
   color-scheme: dark;
-  --background: #181a17;
+  --background: #1c1916;
   --foreground: #eee9df;
-  --paper: #22251f;
-  --paper-deep: #2b2f28;
-  --line: #42463d;
+  --paper: #25211d;
+  --paper-deep: #302a25;
+  --line: #494138;
   --muted: #aaa397;
   --accent: #df775e;
   --accent-ink: #f1947d;
   --accent-soft: #432d27;
-  --preview-mat: #0f0f0e;
+  --preview-mat: #332d27;
 }
 
 * {
@@ -1738,8 +1738,8 @@ footer p + p {
 .dark .preview-empty {
   width: 100%;
   min-height: 380px;
-  border-color: color-mix(in srgb, #ffffff 30%, transparent);
-  color: #d8dfd7;
+  border-color: color-mix(in srgb, var(--foreground) 22%, transparent);
+  color: var(--muted);
 }
 
 .preview-updating,
