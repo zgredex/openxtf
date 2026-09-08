@@ -77,10 +77,29 @@ type ParsedXtf = {
   ranges: RangeRecord[];
 };
 
+type FirmwareAdvanceSource =
+  | 'ascii-table'
+  | 'ascii-width'
+  | 'full-width'
+  | 'glyph-metadata'
+  | 'zero-width'
+  | 'tab-width';
+
+type FirmwareFallbackSource =
+  | 'direct'
+  | 'replacement'
+  | 'question'
+  | 'generated-box'
+  | 'none';
+
 type ResolvedGlyph = {
   record: Uint8Array | null;
   renderedCodePoint: number;
   advance: number;
+  advanceSource: FirmwareAdvanceSource;
+  fallbackSource: FirmwareFallbackSource;
+  storedAdvance: number | null;
+  inkWidth: number;
   xOffset: number;
   missing: boolean;
   generatedBox: boolean;
@@ -309,6 +328,11 @@ export function renderXtfDevicePreview(
   const right = width - margin;
   const bottom = height - margin;
   const contentWidth = right - left;
+  const contentHeight = bottom - margin;
+  const maximumWholeLines =
+    xtf.header.cellH > contentHeight
+      ? 0
+      : 1 + Math.floor((contentHeight - xtf.header.cellH) / linePitch);
   const lines: NonNullable<FontPreviewResult['device']>['lines'] = [];
   const glyphs: NonNullable<FontPreviewResult['device']>['glyphs'] = [];
 
@@ -390,6 +414,10 @@ export function renderXtfDevicePreview(
       top: penY,
       baseline: penY + xtf.header.ascender,
       characterCount: line.glyphs.length,
+      text: line.glyphs.map((glyph) => glyph.character).join(''),
+      baseWidth: line.baseWidth,
+      justificationPixels: justification,
+      justifiedSpaces: extraByGlyph.filter((extra) => extra !== 0).length,
       usedWidth,
       remainingWidth: Math.max(0, contentWidth - usedWidth),
       breakReason: truncatedAfterLine ? 'page-end' : line.breakReason,
@@ -402,6 +430,23 @@ export function renderXtfDevicePreview(
       const originX = Math.round(penX);
       const originY = Math.round(penY);
       const allocatedAdvance = resolved.advance + extraByGlyph[glyphIndex];
+      const inkBounds = resolved.generatedBox
+        ? {
+            x: originX,
+            y: originY,
+            width: xtf.header.cellW,
+            height: xtf.header.cellH,
+          }
+        : resolved.record
+          ? glyphInkBounds(
+              resolved.record,
+              xtf,
+              originX + resolved.xOffset,
+              originY,
+            )
+          : null;
+      const inkLeft = inkBounds?.x ?? originX;
+      const inkRight = inkBounds ? inkBounds.x + inkBounds.width : originX;
       glyphs.push({
         index: glyphs.length,
         character: planned.character,
@@ -410,23 +455,34 @@ export function renderXtfDevicePreview(
         x: originX,
         y: originY,
         advance: allocatedAdvance,
+        baseAdvance: resolved.advance,
+        justificationExtra: extraByGlyph[glyphIndex],
+        advanceSource: resolved.advanceSource,
+        renderedCodePoint: resolved.renderedCodePoint,
+        fallbackSource: resolved.fallbackSource,
+        storedAdvance: resolved.storedAdvance,
+        xOffset: resolved.xOffset,
+        inkWidth: resolved.inkWidth,
+        advanceOverflowLeft: Math.max(0, originX - inkLeft),
+        advanceOverflowRight: Math.max(
+          0,
+          inkRight - (originX + allocatedAdvance),
+        ),
+        contentOverflow: Boolean(
+          inkBounds &&
+            (inkBounds.x < left || inkBounds.x + inkBounds.width > right),
+        ),
+        frameClipped: Boolean(
+          inkBounds &&
+            (inkBounds.x < 0 ||
+              inkBounds.y < 0 ||
+              inkBounds.x + inkBounds.width > width ||
+              inkBounds.y + inkBounds.height > height),
+        ),
+        generatedBox: resolved.generatedBox,
         missing: resolved.missing,
         whitespace: isLayoutWhitespace(planned.codePoint),
-        inkBounds: resolved.generatedBox
-          ? {
-              x: originX,
-              y: originY,
-              width: xtf.header.cellW,
-              height: xtf.header.cellH,
-            }
-          : resolved.record
-            ? glyphInkBounds(
-                resolved.record,
-                xtf,
-                originX + resolved.xOffset,
-                originY,
-              )
-            : null,
+        inkBounds,
       });
       if (resolved.generatedBox) {
         paintGeneratedBox(
@@ -501,16 +557,27 @@ export function renderXtfDevicePreview(
 
   const spaces = [0x20, 0x00a0, 0x3000, 0x09].map((codePoint) => {
     const record = recordForCodePoint(xtf, codePoint);
+    const resolved = resolveFirmwareGlyph(xtf, codePoint);
     return {
       codePoint,
-      advance:
-        codePoint === 0x09
-          ? Math.max(1, xtf.header.asciiWidth)
-          : firmwareAdvance(xtf, codePoint, record),
+      advance: resolved.advance,
       stored: record !== null,
+      advanceSource: resolved.advanceSource,
+      fallbackSource: resolved.fallbackSource,
     };
   });
-  const remainingCharacters = Math.max(0, totalCharacters - glyphs.length);
+  const hiddenCharacters = characters
+    .slice(renderedSourceIndex + 1)
+    .filter((character) => character !== '\n');
+  const remainingCharacters = hiddenCharacters.length;
+  const lastLine = lines.at(-1);
+  const usedHeight = lastLine
+    ? lastLine.top + xtf.header.cellH - margin
+    : 0;
+  let inkCollisionPixels = 0;
+  for (const collision of collisionMask) {
+    if (collision) inkCollisionPixels += 1;
+  }
 
   return {
     dataUrl: canvas.toDataURL('image/png'),
@@ -529,14 +596,41 @@ export function renderXtfDevicePreview(
     device: {
       width,
       height,
+      ppi: 220,
       lineCount: lines.length,
       inkCollisionRows: collisionRows.size,
+      inkCollisionPixels,
       lineTops: lines.map((line) => line.top),
       contentBounds: { left, top: margin, right, bottom },
       missingCodePoints: [...missingCodePoints].sort((a, b) => a - b),
       lines,
       glyphs,
       spaces,
+      xtfHeader: {
+        flags: xtf.header.flags,
+        metadataBytes: xtf.header.metadataBytes,
+        bpp: xtf.header.bpp,
+        cellW: xtf.header.cellW,
+        cellH: xtf.header.cellH,
+        storedAdvanceY: xtf.header.advanceY,
+        effectiveAdvanceY: linePitch,
+        advanceYFallback: xtf.header.advanceY === 0,
+        fullWidth: xtf.header.fullWidth,
+        asciiWidth: xtf.header.asciiWidth,
+        ascender: xtf.header.ascender,
+        descender: xtf.header.descender,
+        rowStride: xtf.header.rowStride,
+        bytesPerGlyph: xtf.header.bytesPerGlyph,
+        glyphCount: xtf.header.glyphCount,
+        rangeCount: xtf.header.rangeCount,
+      },
+      layout: {
+        margin,
+        contentWidth,
+        contentHeight,
+        paragraphExtra,
+        maximumWholeLines,
+      },
       collisionDataUrl,
       pageUsage: {
         displayedCharacters: glyphs.length,
@@ -545,6 +639,9 @@ export function renderXtfDevicePreview(
         truncated: remainingCharacters > 0,
         lastVisibleCharacter:
           renderedSourceIndex >= 0 ? characters[renderedSourceIndex] : '',
+        firstHiddenCharacter: hiddenCharacters[0] ?? '',
+        usedHeight,
+        remainingHeight: Math.max(0, contentHeight - usedHeight),
       },
     },
   };
@@ -722,6 +819,18 @@ function firmwareAdvance(
   return metadataEffectiveAdvance(xtf, record);
 }
 
+function firmwareAdvanceSource(
+  codePoint: number,
+  record: Uint8Array | null,
+): FirmwareAdvanceSource {
+  if (codePoint === 0x09) return 'tab-width';
+  if (codePoint >= 0x20 && codePoint <= 0x7e) return 'ascii-table';
+  if (firmwareZeroAdvanceCodePoint(codePoint)) return 'zero-width';
+  if (record && firmwareUsesGlyphAdvance(codePoint)) return 'glyph-metadata';
+  if (codePoint < 0x80) return 'ascii-width';
+  return 'full-width';
+}
+
 function firmwareUsesGlyphAdvance(codePoint: number) {
   // FUN_42047048 + FUN_42046ce4. The firmware deliberately excludes ordinary
   // CJK/Hangul from the metadata-width path.
@@ -763,10 +872,15 @@ function resolveFirmwareGlyph(
 ): ResolvedGlyph {
   const direct = recordForCodePoint(xtf, codePoint);
   if (direct) {
+    const inkWidth = glyphInkWidth(direct, xtf);
     return {
       record: direct,
       renderedCodePoint: codePoint,
       advance: firmwareAdvance(xtf, codePoint, direct),
+      advanceSource: firmwareAdvanceSource(codePoint, direct),
+      fallbackSource: 'direct',
+      storedAdvance: storedAdvance(xtf, direct),
+      inkWidth: Math.max(0, inkWidth),
       xOffset: signedXOffset(xtf, direct),
       missing: false,
       generatedBox: false,
@@ -778,6 +892,10 @@ function resolveFirmwareGlyph(
       record: null,
       renderedCodePoint: codePoint,
       advance: Math.max(1, xtf.header.asciiWidth),
+      advanceSource: 'tab-width',
+      fallbackSource: 'none',
+      storedAdvance: null,
+      inkWidth: 0,
       xOffset: 0,
       missing: true,
       generatedBox: false,
@@ -791,12 +909,17 @@ function resolveFirmwareGlyph(
     if (codePoint === replacement) continue;
     const record = recordForCodePoint(xtf, replacement);
     if (!record) continue;
+    const inkWidth = glyphInkWidth(record, xtf);
     return {
       record,
       renderedCodePoint: replacement,
       advance: firmwareUsesGlyphAdvance(codePoint)
         ? metadataEffectiveAdvance(xtf, record)
         : firmwareAdvance(xtf, codePoint, null),
+      advanceSource: firmwareAdvanceSource(codePoint, record),
+      fallbackSource: replacement === 0xfffd ? 'replacement' : 'question',
+      storedAdvance: storedAdvance(xtf, record),
+      inkWidth: Math.max(0, inkWidth),
       xOffset: signedXOffset(xtf, record),
       missing: true,
       generatedBox: false,
@@ -807,6 +930,10 @@ function resolveFirmwareGlyph(
     record: null,
     renderedCodePoint: codePoint,
     advance: firmwareAdvance(xtf, codePoint, null),
+    advanceSource: firmwareAdvanceSource(codePoint, null),
+    fallbackSource: 'generated-box',
+    storedAdvance: null,
+    inkWidth: xtf.header.cellW,
     xOffset: 0,
     missing: true,
     generatedBox: true,

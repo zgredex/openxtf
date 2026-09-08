@@ -73,6 +73,16 @@ const KOREAN_NORMAL_WEIGHT = {
 type WeightName = keyof typeof WEIGHT_PRESETS | 'custom';
 type OutputFormat = 'xtf' | 'legacy-bin';
 type GlyphScope = 'device' | 'full';
+type TranslationCopy = (typeof TRANSLATIONS)[Language];
+
+const DIAGNOSTIC_ADVANCE_SOURCES = [
+  'ascii-table',
+  'ascii-width',
+  'full-width',
+  'glyph-metadata',
+  'zero-width',
+  'tab-width',
+] as const;
 
 type Notice =
   | { kind: 'generate' }
@@ -616,6 +626,53 @@ export default function OpenXtfClient() {
     .join(' ');
   const diagnosticDevice = preview?.device ?? null;
   const diagnosticMetrics = preview?.metrics ?? null;
+  const diagnosticLines = diagnosticDevice?.lines ?? [];
+  const diagnosticGlyphs = diagnosticDevice?.glyphs ?? [];
+  const diagnosticSpaces = diagnosticDevice?.spaces ?? [];
+  const diagnosticHeader = diagnosticDevice?.xtfHeader;
+  const diagnosticLayout = diagnosticDevice?.layout;
+  const diagnosticPage = diagnosticDevice?.pageUsage;
+  const diagnosticFirstHiddenCodePoint =
+    diagnosticPage?.firstHiddenCharacter?.codePointAt(0);
+  const diagnosticFirstHiddenLabel =
+    diagnosticFirstHiddenCodePoint === undefined
+      ? ''
+      : `${diagnosticCharacterName(
+          diagnosticFirstHiddenCodePoint,
+          copy,
+          diagnosticPage?.firstHiddenCharacter,
+        )} (${formatCodePoint(diagnosticFirstHiddenCodePoint)})`;
+  const diagnosticAdvanceUsage = DIAGNOSTIC_ADVANCE_SOURCES.map((source) => ({
+    source,
+    count: diagnosticGlyphs.filter((glyph) => glyph.advanceSource === source)
+      .length,
+  }));
+  const diagnosticProtrudingGlyphs = diagnosticGlyphs.filter(
+    (glyph) =>
+      (glyph.advanceOverflowLeft ?? 0) > 0 ||
+      (glyph.advanceOverflowRight ?? 0) > 0,
+  ).length;
+  const diagnosticContentOverflowGlyphs = diagnosticGlyphs.filter(
+    (glyph) => glyph.contentOverflow,
+  ).length;
+  const diagnosticFrameClippedGlyphs = diagnosticGlyphs.filter(
+    (glyph) => glyph.frameClipped,
+  ).length;
+  const diagnosticFallbackGlyphs = diagnosticGlyphs.filter(
+    (glyph) => glyph.missing && !glyph.whitespace,
+  ).length;
+  const diagnosticGeneratedBoxes = diagnosticGlyphs.filter(
+    (glyph) => glyph.generatedBox,
+  ).length;
+  const diagnosticJustifiedLines = diagnosticLines.filter(
+    (line) => (line.justificationPixels ?? 0) > 0,
+  ).length;
+  const diagnosticAutomaticBreaks = diagnosticLines.filter(
+    (line) => line.breakReason === 'automatic',
+  ).length;
+  const diagnosticManualBreaks = diagnosticLines.filter(
+    (line) => line.breakReason === 'manual',
+  ).length;
   const strokeControls =
     format === 'xtf' ? (
       <>
@@ -1401,6 +1458,40 @@ export default function OpenXtfClient() {
                               height: `${((diagnosticDevice.contentBounds.bottom - diagnosticDevice.contentBounds.top) / diagnosticDevice.height) * 100}%`,
                             }}
                           />
+                          {diagnosticDevice.glyphs?.map((glyph) => (
+                            <span
+                              className={`diagnostic-advance-box${glyph.whitespace ? ' is-whitespace' : ''}${glyph.missing ? ' is-missing' : ''}${(glyph.advanceOverflowLeft ?? 0) > 0 || (glyph.advanceOverflowRight ?? 0) > 0 ? ' is-protruding' : ''}`}
+                              style={{
+                                left: `${(glyph.x / diagnosticDevice.width) * 100}%`,
+                                top: `${(glyph.y / diagnosticDevice.height) * 100}%`,
+                                width: `${(Math.max(1, glyph.advance) / diagnosticDevice.width) * 100}%`,
+                                height: `${(diagnosticMetrics.cellH / diagnosticDevice.height) * 100}%`,
+                              }}
+                              key={`advance-${glyph.index}`}
+                            />
+                          ))}
+                          {diagnosticDevice.glyphs?.map((glyph) =>
+                            glyph.inkBounds ? (
+                              <span
+                                className={`diagnostic-ink-box${glyph.contentOverflow ? ' is-overflow' : ''}${glyph.frameClipped ? ' is-clipped' : ''}`}
+                                style={{
+                                  left: `${(glyph.inkBounds.x / diagnosticDevice.width) * 100}%`,
+                                  top: `${(glyph.inkBounds.y / diagnosticDevice.height) * 100}%`,
+                                  width: `${(glyph.inkBounds.width / diagnosticDevice.width) * 100}%`,
+                                  height: `${(glyph.inkBounds.height / diagnosticDevice.height) * 100}%`,
+                                }}
+                                key={`ink-${glyph.index}`}
+                              />
+                            ) : null,
+                          )}
+                          {diagnosticDevice.collisionDataUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              className="diagnostic-collision-map"
+                              src={diagnosticDevice.collisionDataUrl}
+                              alt=""
+                            />
+                          ) : null}
                           {diagnosticDevice.lineTops.map((lineTop, index) => (
                             <span
                               className="diagnostic-baseline"
@@ -1410,6 +1501,24 @@ export default function OpenXtfClient() {
                               key={`${lineTop}-${index}`}
                             >
                               {index + 1}
+                            </span>
+                          ))}
+                          {diagnosticDevice.lines?.map((line) => (
+                            <span
+                              className={`diagnostic-break-marker is-${line.breakReason}`}
+                              style={{
+                                left: `${((diagnosticDevice.contentBounds!.left + Math.min(line.usedWidth, diagnosticDevice.contentBounds!.right - diagnosticDevice.contentBounds!.left)) / diagnosticDevice.width) * 100}%`,
+                                top: `${((line.top + diagnosticMetrics.cellH) / diagnosticDevice.height) * 100}%`,
+                              }}
+                              key={`break-${line.index}`}
+                            >
+                              {line.breakReason === 'automatic'
+                                ? '↳'
+                                : line.breakReason === 'manual'
+                                  ? '↵'
+                                  : line.breakReason === 'page-end'
+                                    ? '■'
+                                    : '•'}
                             </span>
                           ))}
                         </span>
@@ -1427,39 +1536,369 @@ export default function OpenXtfClient() {
               </div>
               {showDiagnostics && preview?.device && preview.metrics ? (
                 <section className="preview-diagnostics-panel">
-                  <div>
-                    <p className="field-label">{copy.previewDiagnostics}</p>
-                    <p className="hint">{copy.diagnosticsHint}</p>
+                  <header className="diagnostics-heading">
+                    <div>
+                      <p className="field-label">{copy.previewDiagnostics}</p>
+                      <p className="hint">{copy.diagnosticsHint}</p>
+                    </div>
+                    <span className="diagnostic-model-badge">
+                      V6.3.15 · {preview.device.width}×{preview.device.height}
+                      {preview.device.ppi ? ` · ${preview.device.ppi} ppi` : ''}
+                    </span>
+                  </header>
+
+                  <div className="diagnostic-overlay-legend">
+                    <span className="is-advance">{copy.overlayAdvance}</span>
+                    <span className="is-ink">{copy.overlayInk}</span>
+                    <span className="is-baseline">{copy.overlayBaseline}</span>
+                    <span className="is-collision">{copy.overlayCollision}</span>
+                    <span className="is-break">{copy.overlayBreaks}</span>
                   </div>
-                  <dl>
-                    <div>
-                      <dt>{copy.diagnosticLines}</dt>
-                      <dd>{formatLocaleNumber(preview.device.lineCount, language)}</dd>
+
+                  <section className="diagnostic-section">
+                    <h3>{copy.diagnosticOverview}</h3>
+                    <dl className="diagnostic-metric-grid">
+                      <div>
+                        <dt>{copy.diagnosticLines}</dt>
+                        <dd>
+                          {formatLocaleNumber(preview.device.lineCount, language)} /{' '}
+                          {diagnosticLayout?.maximumWholeLines ?? '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticPageCharacters}</dt>
+                        <dd>
+                          {diagnosticPage
+                            ? `${formatLocaleNumber(diagnosticPage.displayedCharacters, language)} / ${formatLocaleNumber(diagnosticPage.totalCharacters, language)}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticPitch}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${diagnosticHeader.storedAdvanceY} → ${diagnosticHeader.effectiveAdvanceY} px`
+                            : `${preview.metrics.advanceY} px`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticCell}</dt>
+                        <dd>
+                          {preview.metrics.cellW}×{preview.metrics.cellH} ·{' '}
+                          {preview.metrics.bpp} bpp
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticContentArea}</dt>
+                        <dd>
+                          {diagnosticLayout
+                            ? `${diagnosticLayout.contentWidth}×${diagnosticLayout.contentHeight} · ${diagnosticLayout.margin}px`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticHeaderAdvances}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${diagnosticHeader.fullWidth} / ${diagnosticHeader.asciiWidth} px`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticBaselineMetrics}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${diagnosticHeader.ascender} / ${diagnosticHeader.descender} px`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticRecordLayout}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${diagnosticHeader.rowStride} B/${copy.diagnosticRow} · ${diagnosticHeader.bytesPerGlyph} B/${copy.diagnosticGlyph}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticHeaderFlags}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `0x${diagnosticHeader.flags.toString(16).padStart(2, '0').toUpperCase()} · ${diagnosticHeader.metadataBytes} B`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticFontCoverage}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${formatLocaleNumber(diagnosticHeader.glyphCount, language)} / ${formatLocaleNumber(diagnosticHeader.rangeCount, language)}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticParagraphExtra}</dt>
+                        <dd>{diagnosticLayout?.paragraphExtra ?? '—'} px</dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticCellOverlap}</dt>
+                        <dd>{preview.metrics.cellOverlap} px</dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticVerticalUse}</dt>
+                        <dd>
+                          {diagnosticPage
+                            ? `${diagnosticPage.usedHeight ?? 0} / ${diagnosticPage.remainingHeight ?? 0} px`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticCollision}</dt>
+                        <dd>
+                          {formatLocaleNumber(preview.device.inkCollisionRows, language)}{' '}
+                          {copy.diagnosticRows} ·{' '}
+                          {formatLocaleNumber(preview.device.inkCollisionPixels ?? 0, language)}{' '}
+                          px
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticMissing}</dt>
+                        <dd>
+                          {formatLocaleNumber(previewMissingCodePoints.length, language)}
+                          {previewMissingSample ? ` · ${previewMissingSample}` : ''}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  <section className="diagnostic-section">
+                    <h3>{copy.diagnosticAudit}</h3>
+                    <div className="diagnostic-audit-grid">
+                      <DiagnosticFinding
+                        title={copy.diagnosticAdvanceOverflow}
+                        value={formatLocaleNumber(diagnosticProtrudingGlyphs, language)}
+                        detail={copy.diagnosticAdvanceOverflowDetail}
+                        tone={diagnosticProtrudingGlyphs ? 'warning' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticContentOverflow}
+                        value={formatLocaleNumber(diagnosticContentOverflowGlyphs, language)}
+                        detail={copy.diagnosticContentOverflowDetail}
+                        tone={diagnosticContentOverflowGlyphs ? 'warning' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticFrameClipping}
+                        value={formatLocaleNumber(diagnosticFrameClippedGlyphs, language)}
+                        detail={copy.diagnosticFrameClippingDetail}
+                        tone={diagnosticFrameClippedGlyphs ? 'danger' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticFallbacks}
+                        value={`${formatLocaleNumber(diagnosticFallbackGlyphs, language)} · □ ${formatLocaleNumber(diagnosticGeneratedBoxes, language)}`}
+                        detail={copy.diagnosticFallbacksDetail}
+                        tone={diagnosticFallbackGlyphs ? 'warning' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticLineCollisions}
+                        value={`${formatLocaleNumber(preview.device.inkCollisionRows, language)} / ${formatLocaleNumber(preview.device.inkCollisionPixels ?? 0, language)}`}
+                        detail={copy.diagnosticLineCollisionsDetail}
+                        tone={preview.device.inkCollisionRows ? 'danger' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticPageTruncation}
+                        value={diagnosticPage?.truncated ? copy.yes : copy.no}
+                        detail={
+                          diagnosticPage?.truncated
+                            ? copy.diagnosticPageTruncationDetail(
+                                diagnosticPage.remainingCharacters,
+                                diagnosticFirstHiddenLabel,
+                              )
+                            : copy.diagnosticPageFits
+                        }
+                        tone={diagnosticPage?.truncated ? 'warning' : 'ok'}
+                      />
                     </div>
-                    <div>
-                      <dt>{copy.diagnosticPitch}</dt>
-                      <dd>{preview.metrics.advanceY} px</dd>
+                  </section>
+
+                  <section className="diagnostic-section">
+                    <div className="diagnostic-section-heading">
+                      <h3>{copy.diagnosticAdvancePaths}</h3>
+                      <p>
+                        {copy.diagnosticAdvancePathSummary(
+                          diagnosticJustifiedLines,
+                          diagnosticAutomaticBreaks,
+                          diagnosticManualBreaks,
+                        )}
+                      </p>
                     </div>
-                    <div>
-                      <dt>{copy.diagnosticCell}</dt>
-                      <dd>{preview.metrics.cellW}×{preview.metrics.cellH}</dd>
+                    <div className="diagnostic-path-grid">
+                      {diagnosticAdvanceUsage.map(({ source, count }) => (
+                        <div key={source}>
+                          <span>{copy.diagnosticAdvanceSources[source]}</span>
+                          <strong>{formatLocaleNumber(count, language)}</strong>
+                        </div>
+                      ))}
                     </div>
-                    <div>
-                      <dt>{copy.diagnosticSpace}</dt>
-                      <dd>{koreanProfileActive ? `${koreanSpaceWidth} px` : copy.automatic}</dd>
+                    <p className="diagnostic-firmware-note">
+                      {copy.diagnosticAdvanceRulesHint}
+                    </p>
+                  </section>
+
+                  <section className="diagnostic-section">
+                    <h3>{copy.diagnosticSpaceTable}</h3>
+                    <div className="diagnostic-table-scroll is-compact">
+                      <table className="diagnostic-table">
+                        <thead>
+                          <tr>
+                            <th>{copy.diagnosticCharacter}</th>
+                            <th>{copy.diagnosticCodePoint}</th>
+                            <th>{copy.diagnosticAdvanceSource}</th>
+                            <th>{copy.diagnosticRecordPresent}</th>
+                            <th>{copy.diagnosticEffectiveAdvance}</th>
+                            <th>{copy.diagnosticFallback}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diagnosticSpaces.map((space) => (
+                            <tr key={space.codePoint}>
+                              <td>{diagnosticCharacterName(space.codePoint, copy)}</td>
+                              <td>{formatCodePoint(space.codePoint)}</td>
+                              <td>
+                                {space.advanceSource
+                                  ? copy.diagnosticAdvanceSources[space.advanceSource]
+                                  : '—'}
+                              </td>
+                              <td>{space.stored ? copy.yes : copy.no}</td>
+                              <td>{space.advance} px</td>
+                              <td>
+                                {space.fallbackSource
+                                  ? copy.diagnosticFallbackSources[space.fallbackSource]
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div>
-                      <dt>{copy.diagnosticCollision}</dt>
-                      <dd>{formatLocaleNumber(preview.device.inkCollisionRows, language)} px</dd>
+                  </section>
+
+                  <section className="diagnostic-section">
+                    <h3>{copy.diagnosticLineTable}</h3>
+                    <div className="diagnostic-table-scroll">
+                      <table className="diagnostic-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>{copy.diagnosticText}</th>
+                            <th>{copy.diagnosticBreak}</th>
+                            <th>{copy.diagnosticTopBaseline}</th>
+                            <th>{copy.diagnosticCharacters}</th>
+                            <th>{copy.diagnosticBaseWidth}</th>
+                            <th>{copy.diagnosticJustification}</th>
+                            <th>{copy.diagnosticUsedRemaining}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diagnosticLines.map((line) => (
+                            <tr key={line.index}>
+                              <td>{line.index + 1}</td>
+                              <td className="diagnostic-text-cell">{line.text || '—'}</td>
+                              <td>{copy.diagnosticBreakReasons[line.breakReason]}</td>
+                              <td>{line.top} / {line.baseline}</td>
+                              <td>{line.characterCount}</td>
+                              <td>{line.baseWidth ?? line.usedWidth} px</td>
+                              <td>
+                                +{line.justificationPixels ?? 0} px ·{' '}
+                                {line.justifiedSpaces ?? 0} SP
+                              </td>
+                              <td>
+                                {line.usedWidth} / {line.remainingWidth} px
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <div>
-                      <dt>{copy.diagnosticMissing}</dt>
-                      <dd>
-                        {formatLocaleNumber(previewMissingCodePoints.length, language)}
-                        {previewMissingSample ? ` · ${previewMissingSample}` : ''}
-                      </dd>
+                  </section>
+
+                  <section className="diagnostic-section">
+                    <div className="diagnostic-section-heading">
+                      <h3>{copy.diagnosticGlyphTable}</h3>
+                      <p>{copy.diagnosticGlyphTableHint}</p>
                     </div>
-                  </dl>
+                    <div className="diagnostic-table-scroll is-glyph-table">
+                      <table className="diagnostic-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>{copy.diagnosticCharacter}</th>
+                            <th>{copy.diagnosticCodePoint}</th>
+                            <th>{copy.diagnosticLinePosition}</th>
+                            <th>{copy.diagnosticAdvanceSource}</th>
+                            <th>{copy.diagnosticStoredEffective}</th>
+                            <th>{copy.diagnosticJustification}</th>
+                            <th>{copy.diagnosticOffsetInk}</th>
+                            <th>{copy.diagnosticAdvanceOverflow}</th>
+                            <th>{copy.diagnosticFallback}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {diagnosticGlyphs.map((glyph) => (
+                            <tr
+                              className={
+                                glyph.frameClipped
+                                  ? 'is-danger'
+                                  : glyph.contentOverflow ||
+                                      (glyph.advanceOverflowLeft ?? 0) > 0 ||
+                                      (glyph.advanceOverflowRight ?? 0) > 0 ||
+                                      glyph.missing
+                                    ? 'is-warning'
+                                    : ''
+                              }
+                              key={glyph.index}
+                            >
+                              <td>{glyph.index + 1}</td>
+                              <td>{diagnosticCharacterName(glyph.codePoint, copy, glyph.character)}</td>
+                              <td>
+                                {formatCodePoint(glyph.codePoint)}
+                                {glyph.renderedCodePoint !== undefined &&
+                                glyph.renderedCodePoint !== glyph.codePoint
+                                  ? ` → ${formatCodePoint(glyph.renderedCodePoint)}`
+                                  : ''}
+                              </td>
+                              <td>L{glyph.lineIndex + 1} · {glyph.x},{glyph.y}</td>
+                              <td>
+                                {glyph.advanceSource
+                                  ? copy.diagnosticAdvanceSources[glyph.advanceSource]
+                                  : '—'}
+                              </td>
+                              <td>
+                                {glyph.storedAdvance ?? '—'} /{' '}
+                                {glyph.baseAdvance ?? glyph.advance} px
+                              </td>
+                              <td>+{glyph.justificationExtra ?? 0} px</td>
+                              <td>
+                                x{glyph.xOffset ?? 0} ·{' '}
+                                {glyph.inkBounds
+                                  ? `${glyph.inkBounds.width}×${glyph.inkBounds.height}`
+                                  : '—'}
+                              </td>
+                              <td>
+                                ←{glyph.advanceOverflowLeft ?? 0} / →{glyph.advanceOverflowRight ?? 0}
+                                {glyph.contentOverflow ? ` · ${copy.diagnosticMargin}` : ''}
+                                {glyph.frameClipped ? ` · ${copy.diagnosticScreen}` : ''}
+                              </td>
+                              <td>
+                                {glyph.fallbackSource
+                                  ? copy.diagnosticFallbackSources[glyph.fallbackSource]
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
                 </section>
               ) : null}
               {preview?.dataUrl && !previewLoading ? (
@@ -1746,6 +2185,44 @@ function SegmentButton({
       {children}
     </button>
   );
+}
+
+function DiagnosticFinding({
+  title,
+  value,
+  detail,
+  tone,
+}: {
+  title: string;
+  value: string;
+  detail: string;
+  tone: 'ok' | 'warning' | 'danger';
+}) {
+  return (
+    <article className={`diagnostic-finding is-${tone}`}>
+      <div>
+        <span>{title}</span>
+        <strong>{value}</strong>
+      </div>
+      <p>{detail}</p>
+    </article>
+  );
+}
+
+function formatCodePoint(codePoint: number) {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(codePoint > 0xffff ? 6 : 4, '0')}`;
+}
+
+function diagnosticCharacterName(
+  codePoint: number,
+  copy: TranslationCopy,
+  character?: string,
+) {
+  if (codePoint === 0x20) return copy.diagnosticSpaceNames.space;
+  if (codePoint === 0x00a0) return copy.diagnosticSpaceNames.noBreakSpace;
+  if (codePoint === 0x3000) return copy.diagnosticSpaceNames.ideographicSpace;
+  if (codePoint === 0x09) return copy.diagnosticSpaceNames.tab;
+  return character || String.fromCodePoint(codePoint);
 }
 
 function SettingLabel({ label, help }: { label: string; help?: string }) {

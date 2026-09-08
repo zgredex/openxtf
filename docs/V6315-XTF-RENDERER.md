@@ -126,9 +126,37 @@ clipping that the generated file supplies to V6.3.15. It is not a promise that
 an EPUB page has identical pagination without the same book content, CSS and
 reader settings.
 
-The KO built-in font was rasterized by FreeType at 150 DPI. OpenXTF's standard
-XTF conversion core retains the web XT-maker-compatible outline raster path,
-so its hinting can differ by pixels from the KO fork's compiled bitmap even
-when the same RIDIBatang outline and metrics are selected. The Korean defaults
-minimize scale and placement differences; they do not claim byte-identical KO
-glyph bitmaps.
+## Diagnostic-mode contract
+
+Diagnostic mode is derived from the same decoded XTF records and placement pass
+as the preview image. It does not remeasure the source OTF. The expanded report
+exposes:
+
+- the parsed header, bitmap row stride, record size, glyph/range counts and
+  stored-versus-effective `advanceY`;
+- the firmware advance path chosen for every placed character: ASCII table,
+  ASCII fallback width, Hangul/CJK `fullWidth`, effective glyph metadata,
+  zero-width rule or tab width;
+- the glyph actually rendered after the U+FFFD, `?`, and generated-box fallback
+  chain, including stored advance, signed X offset and scanned ink bounds;
+- ink extending outside its allocated advance, outside the 18 px content inset,
+  or outside the physical 480×800 framebuffer;
+- every line's pre-justification width, distributed U+0020 slack, final width,
+  remaining width, baseline and automatic/manual/page-end break reason;
+- U+0020, U+00A0, U+3000 and tab advances with their record and fallback source;
+- cross-line collision rows and pixels, plus a collision heatmap; and
+- placed glyph count, first hidden character and remaining input characters when
+  the page ends.
+
+The overlay uses blue advance boxes, green ink bounds, numbered baselines,
+break markers and red collision pixels. A glyph can legally extend beyond its
+advance because V6.3.15 blits the complete cell before moving the pen; the
+diagnostic audit reports this separately from true framebuffer clipping.
+
+The KO built-in font used a build-time FreeType resolution setting that produced
+the approximately 29 px raster; this is unrelated to display PPI. OpenXTF's
+standard XTF conversion core retains the web XT-maker-compatible outline raster
+path, so its hinting can differ by pixels from the KO fork's compiled bitmap
+even when the same RIDIBatang outline and metrics are selected. The Korean
+defaults minimize scale and placement differences; they do not claim
+byte-identical KO glyph bitmaps.

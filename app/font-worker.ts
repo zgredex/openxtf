@@ -61,8 +61,10 @@ export type FontPreviewResult = {
   device: {
     width: number;
     height: number;
+    ppi?: number;
     lineCount: number;
     inkCollisionRows: number;
+    inkCollisionPixels?: number;
     lineTops?: number[];
     contentBounds?: {
       left: number;
@@ -76,6 +78,10 @@ export type FontPreviewResult = {
       top: number;
       baseline: number;
       characterCount: number;
+      text?: string;
+      baseWidth?: number;
+      justificationPixels?: number;
+      justifiedSpaces?: number;
       usedWidth: number;
       remainingWidth: number;
       breakReason: 'automatic' | 'manual' | 'text-end' | 'page-end';
@@ -88,6 +94,30 @@ export type FontPreviewResult = {
       x: number;
       y: number;
       advance: number;
+      baseAdvance?: number;
+      justificationExtra?: number;
+      advanceSource?:
+        | 'ascii-table'
+        | 'ascii-width'
+        | 'full-width'
+        | 'glyph-metadata'
+        | 'zero-width'
+        | 'tab-width';
+      renderedCodePoint?: number;
+      fallbackSource?:
+        | 'direct'
+        | 'replacement'
+        | 'question'
+        | 'generated-box'
+        | 'none';
+      storedAdvance?: number | null;
+      xOffset?: number;
+      inkWidth?: number;
+      advanceOverflowLeft?: number;
+      advanceOverflowRight?: number;
+      contentOverflow?: boolean;
+      frameClipped?: boolean;
+      generatedBox?: boolean;
       missing: boolean;
       whitespace: boolean;
       inkBounds: {
@@ -101,7 +131,45 @@ export type FontPreviewResult = {
       codePoint: number;
       advance: number;
       stored: boolean;
+      advanceSource?:
+        | 'ascii-table'
+        | 'ascii-width'
+        | 'full-width'
+        | 'glyph-metadata'
+        | 'zero-width'
+        | 'tab-width';
+      fallbackSource?:
+        | 'direct'
+        | 'replacement'
+        | 'question'
+        | 'generated-box'
+        | 'none';
     }>;
+    xtfHeader?: {
+      flags: number;
+      metadataBytes: number;
+      bpp: number;
+      cellW: number;
+      cellH: number;
+      storedAdvanceY: number;
+      effectiveAdvanceY: number;
+      advanceYFallback: boolean;
+      fullWidth: number;
+      asciiWidth: number;
+      ascender: number;
+      descender: number;
+      rowStride: number;
+      bytesPerGlyph: number;
+      glyphCount: number;
+      rangeCount: number;
+    };
+    layout?: {
+      margin: number;
+      contentWidth: number;
+      contentHeight: number;
+      paragraphExtra: number;
+      maximumWholeLines: number;
+    };
     collisionDataUrl?: string;
     pageUsage?: {
       displayedCharacters: number;
@@ -109,6 +177,9 @@ export type FontPreviewResult = {
       remainingCharacters: number;
       truncated: boolean;
       lastVisibleCharacter: string;
+      firstHiddenCharacter?: string;
+      usedHeight?: number;
+      remainingHeight?: number;
     };
   } | null;
 };
