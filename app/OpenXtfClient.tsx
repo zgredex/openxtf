@@ -65,6 +65,11 @@ const WEIGHT_PRESETS = {
   bold: { gamma: 1.45, thresholds: '38,96,160' },
 } as const;
 
+const KOREAN_NORMAL_WEIGHT = {
+  gamma: 1,
+  thresholds: '64,128,192',
+} as const;
+
 type WeightName = keyof typeof WEIGHT_PRESETS | 'custom';
 type OutputFormat = 'xtf' | 'legacy-bin';
 type GlyphScope = 'device' | 'full';
@@ -93,7 +98,7 @@ export default function OpenXtfClient() {
   const [format, setFormat] = useState<OutputFormat>('xtf');
   const [fontSize, setFontSize] = useState(38);
   const [bpp, setBpp] = useState<1 | 2>(2);
-  const [weight, setWeight] = useState<WeightName>('custom');
+  const [weight, setWeight] = useState<WeightName>('normal');
   const [gamma, setGamma] = useState(1);
   const [thresholds, setThresholds] = useState('64,128,192');
   const [thresholdMode, setThresholdMode] = useState<'symmetric' | 'custom'>(
@@ -449,7 +454,10 @@ export default function OpenXtfClient() {
   }
 
   function applyWeightPreset(name: keyof typeof WEIGHT_PRESETS) {
-    const preset = WEIGHT_PRESETS[name];
+    const preset =
+      koreanProfileActive && name === 'normal'
+        ? KOREAN_NORMAL_WEIGHT
+        : WEIGHT_PRESETS[name];
     setWeight(name);
     setGamma(preset.gamma);
     setThresholdMode('custom');
@@ -461,10 +469,10 @@ export default function OpenXtfClient() {
     setFormat('xtf');
     setFontSize(38);
     setBpp(2);
-    setWeight('custom');
-    setGamma(1);
+    setWeight('normal');
+    setGamma(KOREAN_NORMAL_WEIGHT.gamma);
     setThresholdMode('custom');
-    setThresholds('64,128,192');
+    setThresholds(KOREAN_NORMAL_WEIGHT.thresholds);
     setEmbolden(0);
     setLetterSpacing(0);
     setGlyphScope('full');
@@ -593,14 +601,6 @@ export default function OpenXtfClient() {
   const previewStatus = !font
     ? copy.previewNoFont
     : previewError || copy.previewLoading;
-  const previewReady = Boolean(preview?.dataUrl && !previewLoading);
-  const workflowProgress = results.length
-    ? 3
-    : previewReady
-      ? 2
-      : font
-        ? 1
-        : 0;
   const summaryCell = koreanProfileActive
     ? `${koreanSettings.cellW}×${koreanSettings.cellH}`
     : preview?.metrics
@@ -646,27 +646,6 @@ export default function OpenXtfClient() {
           </button>
         </nav>
       </header>
-
-      <nav className="workflow-strip" aria-label={copy.workflowLabel}>
-        <ol>
-          {copy.workflowSteps.map((step, index) => {
-            const stepNumber = index + 1;
-            const complete = stepNumber <= workflowProgress;
-            const current =
-              workflowProgress < 3 && stepNumber === workflowProgress + 1;
-            return (
-              <li
-                className={`${complete ? 'is-complete' : ''} ${current ? 'is-current' : ''}`}
-                aria-current={current ? 'step' : undefined}
-                key={step}
-              >
-                <span>{stepNumber}</span>
-                <strong>{step}</strong>
-              </li>
-            );
-          })}
-        </ol>
-      </nav>
 
       <main id="workspace" className="studio-main">
         <div className="studio-grid">

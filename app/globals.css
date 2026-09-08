@@ -1301,71 +1301,7 @@ footer p + p {
   }
 }
 
-/* Korean-first workflow and truthful preview diagnostics ----------------- */
-
-.workflow-strip {
-  border-bottom: 1px solid var(--line);
-  background: var(--paper-deep);
-}
-
-.workflow-strip ol {
-  display: grid;
-  max-width: 1440px;
-  margin: 0 auto;
-  padding: 0 24px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  list-style: none;
-}
-
-.workflow-strip li {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 9px;
-  border-right: 1px solid var(--line);
-  color: var(--muted);
-  padding: 11px 16px;
-}
-
-.workflow-strip li:first-child {
-  border-left: 1px solid var(--line);
-}
-
-.workflow-strip li > span {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
-}
-
-.workflow-strip li > strong {
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workflow-strip li.is-complete > span {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fffaf4;
-}
-
-.workflow-strip li.is-complete > strong,
-.workflow-strip li.is-current > strong {
-  color: var(--foreground);
-}
-
-.workflow-strip li.is-current {
-  background: var(--paper);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
+/* Korean-first build summary and truthful preview diagnostics ------------ */
 
 .build-summary {
   display: grid;
@@ -1492,7 +1428,6 @@ footer p + p {
 html:lang(ko) .label,
 html:lang(ko) .field-label,
 html:lang(ko) .workspace-title,
-html:lang(ko) .workflow-strip strong,
 html:lang(ko) button {
   word-break: keep-all;
 }
@@ -1521,19 +1456,6 @@ html:lang(ko) .notice-dialog p {
 }
 
 @media (max-width: 640px) {
-  .workflow-strip ol {
-    padding: 0 12px;
-  }
-
-  .workflow-strip li {
-    justify-content: center;
-    padding: 9px 6px;
-  }
-
-  .workflow-strip li > strong {
-    font-size: 10px;
-  }
-
   .preview-diagnostics-panel dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
