@@ -96,7 +96,7 @@ export default function OpenXtfClient() {
     DEFAULT_KOREAN_X4_SETTINGS,
   );
   const [format, setFormat] = useState<OutputFormat>('xtf');
-  const [fontSize, setFontSize] = useState(38);
+  const [fontSize, setFontSize] = useState(29);
   const [bpp, setBpp] = useState<1 | 2>(2);
   const [weight, setWeight] = useState<WeightName>('normal');
   const [gamma, setGamma] = useState(1);
@@ -156,7 +156,7 @@ export default function OpenXtfClient() {
   const defaultCharacterCount = uniqueCodePointCount(defaultCharacters);
   const extraCharacterCount = uniqueCodePointCount(extraCharacters);
   const totalCharacterCount = uniqueCodePointCount(allCharacters);
-  const koreanSpaceWidth = Math.max(1, koreanSettings.cellW >> 2);
+  const koreanSpaceWidth = koreanSettings.spaceWidth;
   const missingSample = missingCps
     .slice(0, 40)
     .map((cp) => String.fromCodePoint(cp))
@@ -467,7 +467,7 @@ export default function OpenXtfClient() {
   function activateKoreanProfile() {
     setTypographyProfile('korean-x4');
     setFormat('xtf');
-    setFontSize(38);
+    setFontSize(29);
     setBpp(2);
     setWeight('normal');
     setGamma(KOREAN_NORMAL_WEIGHT.gamma);
@@ -906,6 +906,15 @@ export default function OpenXtfClient() {
                         onChange={(value) => updateKoreanSetting('cropTop', value)}
                       />
                       <NumberField
+                        label={copy.storedAdvanceY}
+                        value={koreanSettings.advanceY}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        onChange={(value) => updateKoreanSetting('advanceY', value)}
+                      />
+                      <NumberField
                         label={copy.fullWidthAdvance}
                         value={koreanSettings.fullWidth}
                         min={1}
@@ -914,10 +923,24 @@ export default function OpenXtfClient() {
                         suffix="px"
                         onChange={(value) => updateKoreanSetting('fullWidth', value)}
                       />
-                      <div className="number-field readonly-metric">
-                        <span>{copy.effectiveWordSpace}</span>
-                        <strong>{koreanSpaceWidth} px</strong>
-                      </div>
+                      <NumberField
+                        label={copy.asciiMeanWidth}
+                        value={koreanSettings.asciiWidth}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        onChange={(value) => updateKoreanSetting('asciiWidth', value)}
+                      />
+                      <NumberField
+                        label={copy.effectiveWordSpace}
+                        value={koreanSettings.spaceWidth}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        onChange={(value) => updateKoreanSetting('spaceWidth', value)}
+                      />
                     </div>
                     <p className="hint mt-2">{copy.xtfMetricsHint}</p>
                   </div>
@@ -997,22 +1020,20 @@ export default function OpenXtfClient() {
                 />
               )}
 
-              {!koreanProfileActive ? (
-                <RangeField
-                  label={copy.letterSpacing}
-                  value={`${letterSpacing > 0 ? '+' : ''}${letterSpacing} px`}
-                  min={-12}
-                  max={16}
-                  step={1}
-                  number={letterSpacing}
-                  onChange={setLetterSpacing}
-                  hint={
-                    format === 'legacy-bin'
-                      ? copy.binSpacingHint
-                      : copy.xtfSpacingHint
-                  }
-                />
-              ) : null}
+              <RangeField
+                label={copy.letterSpacing}
+                value={`${letterSpacing > 0 ? '+' : ''}${letterSpacing} px`}
+                min={-12}
+                max={16}
+                step={1}
+                number={letterSpacing}
+                onChange={setLetterSpacing}
+                hint={
+                  format === 'legacy-bin'
+                    ? copy.binSpacingHint
+                    : copy.xtfSpacingHint
+                }
+              />
 
               <label className="fallback-row">
                 <input

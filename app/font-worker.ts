@@ -71,6 +71,45 @@ export type FontPreviewResult = {
       bottom: number;
     };
     missingCodePoints?: number[];
+    lines?: Array<{
+      index: number;
+      top: number;
+      baseline: number;
+      characterCount: number;
+      usedWidth: number;
+      remainingWidth: number;
+      breakReason: 'automatic' | 'manual' | 'text-end' | 'page-end';
+    }>;
+    glyphs?: Array<{
+      index: number;
+      character: string;
+      codePoint: number;
+      lineIndex: number;
+      x: number;
+      y: number;
+      advance: number;
+      missing: boolean;
+      whitespace: boolean;
+      inkBounds: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      } | null;
+    }>;
+    spaces?: Array<{
+      codePoint: number;
+      advance: number;
+      stored: boolean;
+    }>;
+    collisionDataUrl?: string;
+    pageUsage?: {
+      displayedCharacters: number;
+      totalCharacters: number;
+      remainingCharacters: number;
+      truncated: boolean;
+      lastVisibleCharacter: string;
+    };
   } | null;
 };
 

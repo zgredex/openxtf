@@ -38,15 +38,15 @@ export const TRANSLATIONS = {
     koreanReadingProfile: '한국어 독서',
     standardProfile: '표준 XTFont',
     koreanProfileHint:
-      'RIDI바탕 기준의 38px 래스터, 39×38 셀, 2bpp와 9px 단어 간격을 기본으로 사용합니다. 값은 아래에서 조정할 수 있습니다.',
+      'KO 14pt RIDI바탕에 가장 가깝게 맞춘 29px 래스터, 39×38 셀, 38px advanceY, 28px 한글 전각 너비, 9px 단어 간격과 2bpp를 기본으로 사용합니다.',
     standardProfileHint:
       '공식 XTFont Maker와 동일한 자동 측정 및 직렬화 동작을 사용합니다.',
     outputFormat: '출력 형식',
     fontSize: '글꼴 크기',
     rasterSize: '래스터 크기',
     rasterSizeHint:
-      '38px는 한국어 독서 프로필의 기준 래스터 크기입니다. 셀 크기와 별도로 원본 글리프를 래스터화할 때 사용됩니다.',
-    referenceAppearance: '현재 래스터 출력',
+      '29px는 KO 포크의 14pt/150DPI 래스터와 가장 가까운 정수 픽셀 크기입니다. 39×38 저장 셀 및 38px 줄 진행값과는 별개입니다.',
+    referenceAppearance: '완성 XTF 래스터',
     deviceLineSpacing: '기기 줄 간격',
     lineTight: (pixels: number) => `좁게 · ${pixels}px`,
     lineNormal: (pixels: number) => `보통 · ${pixels}px (기본)`,
@@ -67,13 +67,13 @@ export const TRANSLATIONS = {
     cropLeft: '왼쪽 자르기',
     cropTop: '위쪽 자르기',
     storedAdvanceY: '저장 advanceY',
-    fullWidthAdvance: '전각 공백(U+3000) 너비',
-    asciiMeanWidth: 'ASCII 평균 너비',
+    fullWidthAdvance: '한글·CJK 전각 너비',
+    asciiMeanWidth: 'ASCII 대체·탭 너비',
     ascender: '어센더',
     descender: '디센더',
-    effectiveWordSpace: '실제 단어 간격',
+    effectiveWordSpace: '단어 간격(U+0020)',
     xtfMetricsHint:
-      '여기에는 X4의 글자 모양이나 배치에 실제로 영향을 주는 XTF 값만 표시됩니다. 단어 간격은 셀 너비÷4이고, 줄 간격의 기준은 셀 높이입니다. 자르기는 저장되는 글리프 픽셀의 위치를 바꿉니다.',
+      'V6.3.15는 한글에 전각 너비를, ASCII에 글자별 너비 표를 사용합니다. U+0020 단어 간격은 그 표에 따로 저장됩니다. 줄 진행값은 advanceY이며, 0일 때만 셀 높이로 대체됩니다.',
     protectInk: '잉크 손실 방지',
     protectInkHint:
       '목표 셀로 자를 때 글리프 픽셀이 하나라도 사라지면 생성을 중단합니다.',
@@ -98,7 +98,7 @@ export const TRANSLATIONS = {
     binSpacingHint:
       'BIN 파일에 저장되는 셀 너비를 조정합니다. 양수는 자간을 넓히고 음수는 좁히며, 너무 많이 줄이면 획이 잘릴 수 있습니다.',
     xtfSpacingHint:
-      '글리프별 가로 간격을 픽셀 단위로 조정합니다. 양수는 넓히고 음수는 글리프가 겹치지 않는 범위에서 좁힙니다.',
+      '글리프별 저장 너비를 픽셀 단위로 조정합니다. V6.3.15의 일반 한글 자간에는 적용되지 않으며, 한글은 위의 한글·CJK 전각 너비로 조정합니다. ASCII와 일부 비 CJK 유니코드 범위에는 영향을 줍니다.',
     systemFontFallback: '시스템 글꼴 대체',
     systemFontFallbackHint:
       '기본 글꼴과 대체 글꼴에 없는 문자는 브라우저의 시스템 글꼴로 렌더링합니다. 기본 글꼴과 모양이 다를 수 있습니다.',
@@ -289,15 +289,15 @@ export const TRANSLATIONS = {
     koreanReadingProfile: 'Korean reading',
     standardProfile: 'Standard XTFont',
     koreanProfileHint:
-      'Defaults to the RIDIBatang reference: a 38 px raster, 39×38 cells, 2bpp, a 9 px word space, and the 38/45/53 px line-spacing system.',
+      'Defaults to the closest V6.3.15 calibration of KO 14 pt RIDIBatang: a 29 px raster, 39×38 cells, 38 px advanceY, a 28 px Hangul full-width advance, a 9 px word space, and 2bpp.',
     standardProfileHint:
       'Uses the official XTFont Maker automatic measurement and serialization behavior.',
     outputFormat: 'Output format',
     fontSize: 'Font size',
     rasterSize: 'Raster size',
     rasterSizeHint:
-      '38 px is the reference raster size for this Korean reading profile. It rasterizes the source before the target cell is applied.',
-    referenceAppearance: 'Current raster output',
+      '29 px is the closest integer raster to the KO fork’s 14 pt at 150 DPI. It is separate from the 39×38 storage cell and 38 px line advance.',
+    referenceAppearance: 'Finished XTF raster',
     deviceLineSpacing: 'Device line spacing',
     lineTight: (pixels: number) => `Tight · ${pixels} px`,
     lineNormal: (pixels: number) => `Normal · ${pixels} px (default)`,
@@ -318,13 +318,13 @@ export const TRANSLATIONS = {
     cropLeft: 'Crop left',
     cropTop: 'Crop top',
     storedAdvanceY: 'Stored advanceY',
-    fullWidthAdvance: 'Full-width space (U+3000)',
-    asciiMeanWidth: 'ASCII mean width',
+    fullWidthAdvance: 'Hangul/CJK full width',
+    asciiMeanWidth: 'ASCII fallback/tab width',
     ascender: 'Ascender',
     descender: 'Descender',
-    effectiveWordSpace: 'Effective word space',
+    effectiveWordSpace: 'Word space (U+0020)',
     xtfMetricsHint:
-      'Only XTF values that genuinely affect X4 text appearance or layout are shown here. Word space is cell width ÷ 4, line spacing is based on cell height, and cropping repositions the stored glyph pixels.',
+      'V6.3.15 uses fullWidth for Hangul and a per-character table for ASCII. U+0020 has its own stored entry. Vertical line advance comes from advanceY, falling back to cell height only when advanceY is zero.',
     protectInk: 'Protect glyph ink',
     protectInkHint:
       'Stop generation if reframing into the target cell would remove even one nonblank glyph pixel.',
@@ -349,7 +349,7 @@ export const TRANSLATIONS = {
     binSpacingHint:
       'Changes the cell width stored in the BIN file. Positive values loosen spacing; negative values tighten it and may crop strokes if too large.',
     xtfSpacingHint:
-      'Adjust horizontal spacing per glyph, in pixels. Positive loosens, negative tightens (without overlapping glyphs).',
+      'Adjusts stored per-glyph widths. V6.3.15 does not use this for ordinary Hangul; tune Hangul with the Hangul/CJK full width above. It affects ASCII and selected non-CJK Unicode ranges.',
     systemFontFallback: 'System font fallback',
     systemFontFallbackHint:
       "Characters missing from both the main and supplemental fonts are rendered with the browser's system font. Their style may differ from the main font.",

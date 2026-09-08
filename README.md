@@ -1,8 +1,8 @@
 # OpenXTF
 
-OpenXTF is a browser-local compatibility implementation of XT-Cloud Font Maker
-v1.16.7. Its first milestone intentionally mirrors the reference application;
-it does not introduce conversion options or algorithms of its own.
+OpenXTF is a browser-local XT font builder. It preserves the compatible XTF
+and legacy BIN serializers while adding a Korean-first profile and a device
+preview derived from the X4 V6.3.15 rendering path.
 
 Korean is the default interface language. English is available from the
 language switch in the header, and an explicit choice is remembered locally in
@@ -16,6 +16,9 @@ The byte-level format and behavior specifications live in
 [`../xtfont-research/`](../xtfont-research/). The browser worker, FreeType WASM
 runtime, default device repertoire, and controlled reference fixtures are pinned
 to hashes recorded there.
+
+The firmware-backed V6.3.15 glyph and spacing mapping used by the Korean
+preview is documented in [`docs/V6315-XTF-RENDERER.md`](docs/V6315-XTF-RENDERER.md).
 
 ## Privacy boundary
 
