@@ -599,11 +599,14 @@ export default function OpenXtfClient() {
     : previewError || copy.previewLoading;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#101217] dark:text-slate-100">
+    <div className="app-shell min-h-screen">
       <header className="site-header">
         <div className="brand" aria-label="OpenXTF">
-          <span className="brand-mark">O</span>
-          <strong>OpenXTF</strong>
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-copy">
+            <strong>OpenXTF</strong>
+            <small>{copy.brandSubtitle}</small>
+          </span>
         </div>
         <nav className="top-nav" aria-label={copy.primaryNavigation}>
           <button
@@ -625,9 +628,9 @@ export default function OpenXtfClient() {
         </nav>
       </header>
 
-      <main id="workspace" className="mx-auto max-w-[1280px] px-4 pb-10 pt-5">
-        <div className="grid gap-5 lg:grid-cols-[330px_minmax(0,1fr)]">
-          <aside className="min-w-0 space-y-4">
+      <main id="workspace" className="studio-main">
+        <div className="studio-grid">
+          <aside className="studio-inspector min-w-0">
             <section className="card space-y-3">
               <p className="label mb-0">{copy.mainFont}</p>
               <div className="flex items-stretch gap-2">
@@ -1144,8 +1147,8 @@ export default function OpenXtfClient() {
             </section>
           </aside>
 
-          <div className="min-w-0 space-y-4">
-            <section className="card space-y-4">
+          <div className="studio-canvas min-w-0">
+            <section className="card studio-toolbar space-y-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="eyebrow">
@@ -1188,7 +1191,7 @@ export default function OpenXtfClient() {
               {success ? <p className="success-message">{success}</p> : null}
             </section>
 
-            <section className="card min-w-0 space-y-3">
+            <section className="card preview-studio min-w-0 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p className="label mb-0">{copy.previewText}</p>
                 <div className="preview-source-actions">
@@ -1303,7 +1306,7 @@ export default function OpenXtfClient() {
               ) : null}
             </section>
 
-            <section className="card space-y-2">
+            <section className="card character-studio space-y-2">
               <button
                 type="button"
                 className="characters-toggle"
@@ -1385,7 +1388,7 @@ export default function OpenXtfClient() {
               )}
             </section>
 
-            <section className="card space-y-4">
+            <section className="card export-studio space-y-4">
               <div>
                 <p className="label mb-0">{copy.results}</p>
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">

@@ -7,7 +7,8 @@ export const TRANSLATIONS = {
     switchLanguageLabel: '영어로 전환',
     switchToLight: '라이트 모드로 전환',
     switchToDark: '다크 모드로 전환',
-    mainFont: '기본 폰트',
+    brandSubtitle: '기기를 위한 활자 공방',
+    mainFont: '글꼴 소스',
     pickFont: '폰트 선택…',
     local: '로컬',
     upload: '업로드',
@@ -18,7 +19,7 @@ export const TRANSLATIONS = {
     loadingReadyFont: 'RIDI바탕 불러오는 중…',
     readyFontError:
       '내장 RIDI바탕 폰트를 불러올 수 없습니다. 페이지를 새로고침한 뒤 다시 시도하세요.',
-    supplementalFonts: '보조 폰트',
+    supplementalFonts: '대체 글꼴',
     clearAll: '모두 지우기',
     supplementalFontHint:
       '기본 폰트에 없는 문자는 보조 폰트를 사용해 자동으로 표시합니다.',
@@ -28,7 +29,7 @@ export const TRANSLATIONS = {
       '시스템 폰트 대체가 켜져 있어 위 문자는 브라우저의 시스템 폰트로 폰트 파일에 렌더링됩니다.',
     removeFont: (name: string) => `${name} 삭제`,
     addSupplementalFonts: '보조 폰트 추가',
-    conversionSettings: '변환 설정',
+    conversionSettings: '글자 모양',
     typographyProfile: '타이포그래피 프로필',
     koreanReadingProfile: '한국어 독서',
     standardProfile: '표준 XTFont',
@@ -122,16 +123,16 @@ export const TRANSLATIONS = {
     manualThresholds: '수동 t0,t1,t2',
     spreadHint: (spread: number) => `간격 ${spread}, 128을 중심으로 적용합니다.`,
     legacyBin: '레거시 BIN (.bin)',
-    generationWorkspace: '생성 작업공간',
+    generationWorkspace: '출력 준비',
     workspaceCopy:
-      '변환은 브라우저에서 로컬로 실행됩니다. 폰트 파일은 업로드되지 않습니다. 브라우저 렌더링 결과는 오프라인 FreeType 도구와 조금 다를 수 있습니다.',
+      '선택한 글꼴과 현재 설정으로 XT 기기용 파일을 만듭니다. 모든 처리는 이 브라우저 안에서만 이루어집니다.',
     koreanWorkspaceCopy:
-      '브라우저에서 로컬로 변환한 뒤 X4용 39×38 셀 메트릭을 적용합니다. 미리보기는 최종 XTF 비트맵과 V6.3.15 기기 간격 규칙으로 다시 구성됩니다.',
+      '현재 글꼴을 39×38 독서 셀에 맞추고, 완성된 XTF 데이터로 실제 기기 미리보기를 구성합니다.',
     generating: '생성 중',
     generate: '생성',
     building: (size: number) => `생성 중 1/1: ${size}px`,
     generatedSuccess: '폰트 파일 1개를 생성했습니다. 아래에서 다운로드하세요.',
-    previewText: '미리보기 텍스트',
+    previewText: '읽기 미리보기',
     loadEpub: 'EPUB 불러오기',
     loadingEpub: 'EPUB 읽는 중…',
     clearEpub: 'EPUB 닫기',
@@ -169,7 +170,7 @@ export const TRANSLATIONS = {
       collisions: number,
     ) =>
       `최종 XTF 셀을 X4 V6.3.15 방식으로 렌더링했습니다. ${lines}줄 · 줄 간격 ${pitch}px · 단어 간격 ${space}px · 줄 간 잉크 충돌 ${collisions}px.`,
-    supplementalCharacters: '보조 문자',
+    supplementalCharacters: '포함할 문자',
     chars: '자',
     characterSummary: (defaults: number, extras: number, total: number) =>
       `기본 ${defaults}자, 추가 ${extras}자, 보조 문자 총 ${total}자. 탭하여 보거나 편집하세요.`,
@@ -182,7 +183,7 @@ export const TRANSLATIONS = {
     extraCharacterCount: (count: number) => `추가 문자 ${count}자`,
     characterModeHint:
       '기기 문자 세트 모드는 기본 세트와 추가 문자를 생성합니다. 전체 폰트 모드는 기본 폰트의 cmap도 합칩니다. 줄바꿈은 무시하고 공백은 유지합니다.',
-    results: '결과',
+    results: '내보내기',
     fileCount: (count: number) => `파일 ${count}개`,
     noOutput: '아직 출력 없음',
     legacySummary: (slots: number | undefined, glyphs: number) =>
@@ -236,7 +237,8 @@ export const TRANSLATIONS = {
     switchLanguageLabel: 'Switch to Korean',
     switchToLight: 'Switch to light mode',
     switchToDark: 'Switch to dark mode',
-    mainFont: 'Main font',
+    brandSubtitle: 'Type workshop for devices',
+    mainFont: 'Font source',
     pickFont: 'Pick a font…',
     local: 'Local',
     upload: 'Upload',
@@ -247,7 +249,7 @@ export const TRANSLATIONS = {
     loadingReadyFont: 'Loading RIDI Batang…',
     readyFontError:
       'The bundled RIDI Batang font could not load. Refresh the page and try again.',
-    supplementalFonts: 'Supplemental fonts',
+    supplementalFonts: 'Fallback fonts',
     clearAll: 'Clear all',
     supplementalFontHint:
       'When the main font is missing some characters, supplemental fonts are used automatically for display.',
@@ -257,7 +259,7 @@ export const TRANSLATIONS = {
       "System font fallback is on: the characters above will be rendered into the font file using the browser's system font.",
     removeFont: (name: string) => `Remove ${name}`,
     addSupplementalFonts: 'Add supplemental fonts',
-    conversionSettings: 'Conversion settings',
+    conversionSettings: 'Typography',
     typographyProfile: 'Typography profile',
     koreanReadingProfile: 'Korean reading',
     standardProfile: 'Standard XTFont',
@@ -350,16 +352,16 @@ export const TRANSLATIONS = {
     manualThresholds: 'Manual t0,t1,t2',
     spreadHint: (spread: number) => `Spread ${spread}, centered around 128.`,
     legacyBin: 'Legacy BIN (.bin)',
-    generationWorkspace: 'Generation workspace',
+    generationWorkspace: 'Build output',
     workspaceCopy:
-      'Conversion runs locally in your browser. Font files are not uploaded. Browser rendering may differ slightly from the offline FreeType tool.',
+      'Create an XT device font from the selected face and current settings. All processing stays inside this browser.',
     koreanWorkspaceCopy:
-      'Conversion runs locally, then applies the 39×38 X4 cell metrics. The preview is recomposed from the final XTF bitmaps using the V6.3.15 device-spacing rules.',
+      'Fit the current typeface to the 39×38 reading cell and compose the device preview from the finished XTF data.',
     generating: 'Generating',
     generate: 'Generate',
     building: (size: number) => `Building 1/1: ${size}px`,
     generatedSuccess: 'Generated 1 font file. Download it below.',
-    previewText: 'Preview text',
+    previewText: 'Reading preview',
     loadEpub: 'Load EPUB',
     loadingEpub: 'Reading EPUB…',
     clearEpub: 'Close EPUB',
@@ -397,7 +399,7 @@ export const TRANSLATIONS = {
       collisions: number,
     ) =>
       `Rendered from final XTF cells with the X4 V6.3.15 path: ${lines} line(s), ${pitch} px pitch, ${space} px word space, ${collisions} px of cross-line ink collision.`,
-    supplementalCharacters: 'Supplemental characters',
+    supplementalCharacters: 'Character set',
     chars: 'chars',
     characterSummary: (defaults: number, extras: number, total: number) =>
       `${defaults} default, ${extras} extra; ${total} supplemental characters total. Tap to view or edit.`,
@@ -410,7 +412,7 @@ export const TRANSLATIONS = {
     extraCharacterCount: (count: number) => `${count} extra character(s)`,
     characterModeHint:
       'Device-set mode generates the default set and extra characters. Full-font mode also merges the main font cmap. Line breaks are ignored and spaces are preserved.',
-    results: 'Results',
+    results: 'Exports',
     fileCount: (count: number) => `${count} file(s)`,
     noOutput: 'No output yet',
     legacySummary: (slots: number | undefined, glyphs: number) =>
