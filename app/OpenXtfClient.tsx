@@ -171,10 +171,6 @@ export default function OpenXtfClient() {
   }, [font, fallbacks]);
 
   useEffect(() => {
-    const storedLanguage: Language =
-      localStorage.getItem('openxtf_language') === 'en' ? 'en' : 'ko';
-    queueMicrotask(() => setLanguage(storedLanguage));
-
     const storedDark = localStorage.getItem('xt_dark') === '1';
     document.documentElement.classList.toggle('dark', storedDark);
     queueMicrotask(() => setDark(storedDark));
@@ -187,7 +183,7 @@ export default function OpenXtfClient() {
       })
       .catch(() => {
         if (!cancelled) {
-          setError(TRANSLATIONS[storedLanguage].readyFontError);
+          setError(TRANSLATIONS.ko.readyFontError);
         }
       })
       .finally(() => {
@@ -197,7 +193,7 @@ export default function OpenXtfClient() {
     fetch('/data/default-device-characters.txt')
       .then((response) => {
         if (!response.ok) {
-          throw new Error(TRANSLATIONS[storedLanguage].defaultCharactersError);
+          throw new Error(TRANSLATIONS.ko.defaultCharactersError);
         }
         return response.text();
       })
@@ -216,7 +212,7 @@ export default function OpenXtfClient() {
         if (!cancelled) setWorkerReady(true);
       })
       .catch((reason: FontWorkerError) => {
-        if (!cancelled) setError(mapWorkerError(reason, storedLanguage));
+        if (!cancelled) setError(mapWorkerError(reason, 'ko'));
       });
 
     return () => {
@@ -514,7 +510,6 @@ export default function OpenXtfClient() {
     setLanguage(next);
     setError('');
     setSuccess('');
-    localStorage.setItem('openxtf_language', next);
   }
 
   function requestGenerate() {

@@ -18,7 +18,7 @@
   --accent: #ae4a32;
   --accent-ink: #8f3825;
   --accent-soft: #f1ddd3;
-  --preview-mat: #29342d;
+  --preview-mat: #302c27;
 }
 
 .dark {
@@ -32,7 +32,7 @@
   --accent: #df775e;
   --accent-ink: #f1947d;
   --accent-soft: #432d27;
-  --preview-mat: #101510;
+  --preview-mat: #0f0f0e;
 }
 
 * {
