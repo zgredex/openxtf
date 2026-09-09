@@ -5,7 +5,7 @@ export type EpubSection = {
   label: string;
   text: string;
   blocks: EpubBlock[];
-  ignoredBlankBlocks: number;
+  retainedBlankBlocks: number;
 };
 
 export type EpubBlock = {
@@ -102,13 +102,13 @@ export async function readEpub(file: File): Promise<EpubBook> {
       files,
       filesByLowerPath,
     );
-    if (!content.text) continue;
+    if (!content.blocks.some((block) => block.text.length > 0)) continue;
     sections.push({
       id: `${sections.length}:${contentPath}`,
       label: content.heading || chapterLabel(contentPath, sections.length + 1),
       text: content.text.slice(0, MAX_SECTION_CHARACTERS),
       blocks: trimBlocks(content.blocks, MAX_SECTION_CHARACTERS),
-      ignoredBlankBlocks: content.ignoredBlankBlocks,
+      retainedBlankBlocks: content.retainedBlankBlocks,
     });
   }
 
@@ -207,14 +207,11 @@ function extractReadableContent(
     candidates.push(body);
   }
   const blocks: EpubBlock[] = [];
-  let ignoredBlankBlocks = 0;
+  let retainedBlankBlocks = 0;
   for (const element of candidates) {
     const text = normalizeBlockText(readElementText(element));
-    if (!text) {
-      ignoredBlankBlocks += 1;
-      continue;
-    }
     const bookStyle = bookBlockStyle(element, rules);
+    if (!text) retainedBlankBlocks += 1;
     blocks.push({
       text,
       tag: element.localName.toLowerCase(),
@@ -229,7 +226,7 @@ function extractReadableContent(
     heading,
     text: blocks.map((block) => block.text).join('\n\n'),
     blocks,
-    ignoredBlankBlocks,
+    retainedBlankBlocks,
   };
 }
 
@@ -339,7 +336,7 @@ function trimBlocks(blocks: EpubBlock[], limit: number) {
   for (const block of blocks) {
     if (remaining <= 0) break;
     const text = block.text.slice(0, remaining);
-    if (text) result.push({ ...block, text });
+    if (text || block.text.length === 0) result.push({ ...block, text });
     remaining -= text.length + 2;
   }
   return result;

@@ -326,7 +326,7 @@ export default function OpenXtfClient() {
             {
               layout: deviceLayoutSettings,
               blocks: previewBlocks,
-              ignoredBlankBlocks: selectedEpubSection?.ignoredBlankBlocks,
+              retainedBlankBlocks: selectedEpubSection?.retainedBlankBlocks,
             },
           );
         } else {
@@ -620,7 +620,7 @@ export default function OpenXtfClient() {
             {
               layout: deviceLayoutSettings,
               blocks: previewBlocks,
-              ignoredBlankBlocks: selectedEpubSection?.ignoredBlankBlocks,
+              retainedBlankBlocks: selectedEpubSection?.retainedBlankBlocks,
             },
           ),
         );
@@ -1447,11 +1447,13 @@ export default function OpenXtfClient() {
                       <p className="hint">{copy.deviceOnlySettingsHint}</p>
                     </div>
                     <span className="device-layout-result">
-                      {copy.exactLineAdvance(
-                        koreanSettings.cellH,
-                        deviceLineFactor,
-                        deviceLineAdvance,
-                      )}
+                      {deviceLayoutSettings.lineSpacing === 'auto'
+                        ? copy.lineAutoDynamic
+                        : copy.exactLineAdvance(
+                            koreanSettings.cellH,
+                            deviceLineFactor,
+                            deviceLineAdvance,
+                          )}
                     </span>
                   </div>
                   <div className="device-reader-layout-grid">
@@ -1701,9 +1703,33 @@ export default function OpenXtfClient() {
                         <dt>{copy.diagnosticPitch}</dt>
                         <dd>
                           {diagnosticLayout?.lineAdvance !== undefined &&
-                          diagnosticLayout.lineSpacingFactor !== undefined
-                            ? `${preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
+                          diagnosticLayout.autoDistributed &&
+                          diagnosticLayout.weightedIntervals !== undefined
+                            ? `756 ÷ ${formatFirmwareNumber(diagnosticLayout.weightedIntervals, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
+                            : diagnosticLayout?.lineAdvance !== undefined &&
+                                diagnosticLayout.lineSpacingFactor !== undefined
+                              ? `${preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
                             : `${preview.metrics.advanceY} px`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticPaginationPitch}</dt>
+                        <dd>
+                          {diagnosticLayout?.initialLineAdvance !== undefined
+                            ? `${formatFirmwareNumber(diagnosticLayout.initialLineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.initialLineAdvance)}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticAutoIntervals}</dt>
+                        <dd>
+                          {diagnosticLayout?.autoDistributed &&
+                          diagnosticLayout.normalBoundaryCount !== undefined &&
+                          diagnosticLayout.paragraphBoundaryCount !== undefined &&
+                          diagnosticLayout.paragraphRatio !== undefined &&
+                          diagnosticLayout.weightedIntervals !== undefined
+                            ? `${diagnosticLayout.normalBoundaryCount} + ${diagnosticLayout.paragraphBoundaryCount} × ${formatFirmwareNumber(diagnosticLayout.paragraphRatio, language)} = ${formatFirmwareNumber(diagnosticLayout.weightedIntervals, language)}`
+                            : '—'}
                         </dd>
                       </div>
                       <div>
@@ -1761,15 +1787,16 @@ export default function OpenXtfClient() {
                       <div>
                         <dt>{copy.diagnosticPageLimit}</dt>
                         <dd>
-                          {diagnosticLayout?.readingSurfaceHeight ?? '—'} px · +
-                          {diagnosticLayout?.pageFitBottomOffset ?? '—'} px
+                          {diagnosticLayout?.firstLineY ?? '—'}…
+                          {diagnosticLayout?.lastLineY ?? '—'} px ·{' '}
+                          {diagnosticLayout?.readingSurfaceHeight ?? '—'} px
                         </dd>
                       </div>
                       <div>
                         <dt>{copy.diagnosticFirstLineY}</dt>
                         <dd>
                           {diagnosticLayout?.firstLineY !== undefined
-                            ? `${formatFirmwareNumber(diagnosticLayout.firstLineY, language)} · f32 ${float32Hex(diagnosticLayout.firstLineY)} → ${Math.trunc(Math.fround(diagnosticLayout.firstLineY))} px`
+                            ? `${formatFirmwareNumber(diagnosticLayout.firstLineY, language)} + ${formatFirmwareNumber(diagnosticLayout.drawRoundingBias ?? 0.99, language)} → ${Math.trunc(Math.fround(Math.fround(diagnosticLayout.firstLineY) + Math.fround(diagnosticLayout.drawRoundingBias ?? 0.99)))} px`
                             : '—'}
                         </dd>
                       </div>
@@ -1810,8 +1837,11 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
-                        <dt>{copy.diagnosticIgnoredBlankBlocks}</dt>
-                        <dd>{diagnosticLayout?.ignoredBlankBlocks ?? 0}</dd>
+                        <dt>{copy.diagnosticRetainedBlankBlocks}</dt>
+                        <dd>
+                          {diagnosticLayout?.retainedBlankBlocks ?? 0} /{' '}
+                          {diagnosticLayout?.blankLineRecords ?? 0}
+                        </dd>
                       </div>
                       <div>
                         <dt>{copy.diagnosticCellOverlap}</dt>

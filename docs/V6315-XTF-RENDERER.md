@@ -1,222 +1,228 @@
 # X4 V6.3.15 XTF renderer mapping
 
 This document defines the model used by OpenXTF's device preview. The source of
-truth is `/v6315-payload.bin` in the `Xteink` Ghidra project. Values inferred
-from device photographs are deliberately excluded.
+truth is V6.3.15 in the local `Xteink` Ghidra project: executable code was
+traced in `/v6315-payload.bin`, while DROM constants were read from
+`/V6.3.15-X4-EN-PROD-0905_113512.elf`. Device photographs are comparison
+evidence only; no geometry below is estimated from a photograph.
 
-## Verified page geometry
+The raw payload's DROM mapping is displaced by eight bytes. Reading strings or
+float tables from that mapping gives plausible but wrong values. All DROM
+claims below use the correctly mapped ELF.
 
-- The framebuffer is 480 × 800 pixels.
-- The panel is 220 PPI. PPI does not scale an XTF bitmap after loading.
-- Reading mode 0 uses an 18 px horizontal inset (`FUN_4209810e`), leaving a
-  444 px text width.
-- The external-font page loop uses the literal limit `0x28e`, or 654 pixels,
-  for its page-end test (`FUN_420aff66`). The remaining framebuffer height is
-  not another text-flow area.
-- The external-XTF branch initializes its Y accumulator with the exact float
-  `0x3fe66666`, or `1.8f`. Each draw call receives the integer truncation of
-  that accumulated float.
+## Selecting the XTF renderer
 
-For a line origin `y`, the page loop accepts the line while:
+`FUN_4205baa0` recognizes `.xtf` and `.XTF`. That check selects the specialized
+XTF branch in `FUN_4209810e`. The other branch performs `align`, `n`, and `我`
+ink calibration for a different font engine. That calibration and the
+`FUN_420aff66` 654 px settings-preview boundary do **not** control normal XTF
+EPUB pages.
+
+`FUN_420425ba` verifies the `XTF0` signature and 1/2 bpp format, and
+`FUN_420426fc` activates the specialized engine. `FUN_42078bd8` copies XTF
+header byte `0x0a` (`cellW`) and byte `0x0b` (`cellH`) into its context.
+
+## Page geometry
+
+- framebuffer: 480 × 800 px;
+- panel density: 220 PPI (it does not rescale loaded XTF bitmaps);
+- mode-0 horizontal inset: 18 px on each side;
+- text width: 444 px;
+- ordinary first XTF line origin: 22 px;
+- lower Auto-distribution origin: `800 - 22 = 778` px;
+- Auto-distribution span: `778 - 22 = 756` px.
+
+The XTF bitmap cell is drawn at the calculated integer origin. The call chain
+`FUN_42099372` → `FUN_42080fa8` → `FUN_42080708` → `FUN_4206a458` passes Y
+through as the first bitmap row; the blitter checks each row against the
+physical framebuffer dimension and applies no typographic baseline offset.
+XTF ascender, descender, and stored `advanceY` do not reposition that bitmap in
+this reader path. Therefore an Auto page whose last origin is 778 can have its
+cell's lower rows clipped at 800; the preview and clipping diagnostic preserve
+that firmware behavior.
+
+Before converting a floating draw coordinate to an integer,
+`FUN_420db6a4` adds binary32 `0x3f7d70a4` (the compiled `0.99f`) and truncates:
 
 ```text
-trunc(y) + calibratedGlyphBottom <= 654
+drawY = trunc(f32(accumulatedY + 0.99f))
 ```
 
-The calibration is performed when the XTF is applied. `FUN_4209810e` measures
-the exact samples `align`, `n`, and U+6211 (`我`), averages their bottom ink
-rows, and stores that value at render-context offset `+0x0a`. OpenXTF performs
-the same scan on the finished XTF glyph records. It does not use `cellH` as a
-substitute for this page-fit test.
+OpenXTF performs each corresponding operation with `Math.fround`; it does not
+accumulate rounded display decimals as JavaScript binary64 values.
 
-## Exact vertical stepping
+## Manual line-spacing choices
 
-`FUN_4209810e` loads the XTF `cellH` byte into the external-font context. The
-active external branch calculates:
+For the numbered choices, `FUN_4209810e` stores:
 
 ```text
-lineStep = float(cellH) * lineSpacingLS
+initialLineStep = f32(f32(cellH) * lineSpacingLS)
 ```
 
-The compiled factor table at `ram:3c58304c` contains these binary32 values. The
-decimal in the first column is the device UI label; the hexadecimal word is the
-exact stored value:
+The correctly mapped table contains:
 
-| UI label | binary32 word | Stored binary32 value |
+| Device choice | binary32 word | With `cellH=38` |
 | --- | --- | ---: |
-| 1.0 | `0x3f800000` | 1 |
-| 1.2 | `0x3f99999a` | 1.2000000476837158 |
-| 1.4 | `0x3fb33333` | 1.399999976158142 |
-| 1.6 | `0x3fcccccd` | 1.600000023841858 |
-| 1.8 | `0x3fe66666` | 1.7999999523162842 |
-| 2.0 | `0x40000000` | 2 |
+| 1.2 | `0x3f99999a` | 45.60000228881836 px |
+| 1.4 | `0x3fb33333` | 53.20000076293945 px |
+| 1.6 | `0x3fcccccd` | 60.79999923706055 px |
+| 1.8 | `0x3fe66666` | 68.4000015258789 px |
+| 2.0 | `0x40000000` | 76 px |
 
-The device UI labels the 1.0 entry `Auto`. It is not EPUB CSS `line-height`.
-The painter keeps `y` as a single-precision float, adds `lineStep` with
-single-precision rounding, then truncates separately for every line. OpenXTF
-uses `Math.fround` after every corresponding multiply and addition. A 38 px
-cell therefore produces these exact binary32 steps:
-
-| Device choice | binary32 word | Exact stored line step | UI decimal |
-| --- | --- | ---: | ---: |
-| Auto | `0x42180000` | 38 | 38 px |
-| 1.2 | `0x42366667` | 45.60000228881836 | 45.6 px |
-| 1.4 | `0x4254cccd` | 53.20000076293945 | 53.2 px |
-| 1.6 | `0x42733333` | 60.79999923706055 | 60.8 px |
-| 1.8 | `0x4288cccd` | 68.4000015258789 | 68.4 px |
-| 2.0 | `0x42980000` | 76 | 76 px |
-
-Integer draw origins must be obtained by accumulating the float and truncating;
-rounding the displayed decimal step first or accumulating it as JavaScript
-binary64 is not firmware-equivalent. For example, the exact 1.6× origin
-sequence starts `1, 62, 123, 184, 245, 305, 366…`; the firmware never has a
-58 px line-step setting.
-
-`FUN_420570e4` returns both the line step and `paraRatioLS`. At a real paragraph
-boundary, `FUN_420aff66` advances from the previous line origin by:
+The manual capacity branch uses `screenHeight - 17` as its lower limit. It
+starts with:
 
 ```text
-paragraphStep = lineStep * paraRatioLS
-extraWhitespace = paragraphStep - lineStep
+floor((screenHeight - 17 - firstY - cellH) / initialLineStep) + 1
 ```
 
-The compiled paragraph-ratio table at `ram:3c268b64` uses the binary32 values
-for these UI choices:
+and then verifies the last origin with the same `0.99f` comparison bias. This
+is why capacity must not be derived from CSS height or from the old 654 px
+settings-preview function.
+
+## Auto is page-dependent
+
+The UI's Auto choice is detected by `FUN_4204d3f2` using the values around 1.0
+in the correctly mapped DROM table. It is a distinct layout mode, not a fixed
+1.0× line-height.
+
+### Stage 1: pagination capacity
+
+For ordinary mode 0, `FUN_4209810e` calculates:
+
+```text
+rawRows = floor((screenHeight - 44) / cellH)
+rows = rawRows - 2
+initialLineStep = f32((screenHeight - 44) / (rows - 1))
+```
+
+The subtraction comes from `FUN_4204d434(4)`. With a 38 px XTF cell this gives
+`rawRows=19`, `rows=17`, and an initial pagination step of exactly `47.25f`.
+This initial step/capacity determines which visual-line records belong to the
+page; it is not necessarily their final painted separation.
+
+### Stage 2: painting the selected page
+
+For a text-only page with at least two records, `FUN_420db6a4` counts explicit
+paragraph boundaries using `FUN_42057034`/`FUN_420570e4`, then calculates:
+
+```text
+normalIntervals = lineCount - 1 - paragraphBoundaryCount
+weightedIntervals =
+  normalIntervals + paragraphBoundaryCount * paragraphRatioLS
+paintedLineStep = f32(756 / weightedIntervals)
+paintedParagraphStep = f32(paintedLineStep * paragraphRatioLS)
+```
+
+Normal transitions add `paintedLineStep`; real paragraph transitions add
+`paintedParagraphStep`. Consequently, a page with fewer visual lines has wider
+line gaps. For example, 13 lines, two paragraph boundaries, and 1.5× paragraph
+spacing produce 13 weighted intervals and a binary32 step derived from
+`756 / 13`. This is the firmware explanation for the larger gaps seen on the
+device; no 58 px constant exists.
+
+The default OpenXTF profile remains manual 1.2× rather than Auto because the KO
+fork's measured 43 px same-paragraph tier is closer to V6.3.15's selectable
+45.600002… px step than to Auto's content-dependent result. Preview and device
+only match when the same runtime choice is selected on both.
+
+## Paragraph and blank-line records
+
+The paragraph-ratio table contains exact binary32 representations of:
 
 ```text
 1.0, 1.25, 1.5, 1.75, 2.0
 ```
 
-Thus `1×` means one normal line step between the two origins. It does not mean
-one normal step plus another full blank line.
+At an explicit boundary, the origin-to-origin transition is
+`lineStep * paragraphRatioLS`; 1× is one normal transition, not a normal
+transition plus a second full blank line.
 
-The EPUB's empty NBSP-only `<p>` elements are not drawable text lines in this
-reader path. OpenXTF removes them but reports their count in diagnostics.
+`FUN_4209692e` preserves an empty source line as an empty 16-byte visual-line
+record once page text has started. It is not painted, but it participates in
+the page's line count and spacing. OpenXTF therefore retains empty EPUB block
+records instead of deleting them. An empty record itself has no trailing LF,
+so it is not counted as an explicit paragraph boundary.
 
-## XTF header fields actually used here
+This distinction is material: deleting blank records lowers the page line
+count, changes the Auto denominator, changes every Y coordinate, and moves the
+page break.
 
-`FUN_42078bd8` copies:
+## Horizontal XTF behavior
 
-- header byte `0x0a` (`cellW`) to context `+0x0c` and `+0x12`;
-- header byte `0x0b` (`cellH`) to context `+0x0e`.
+`FUN_42093b1a` initializes the active context spacing words to 1.
 
-The active line-step branch uses `cellH`. It does not use the XTF `advanceY`
-byte for XTF reading line spacing. The XTF ascender and descender are also not
-used as draw-time baselines: the finished bitmap cell is drawn at the line
-origin. OpenXTF retains these fields for file compatibility but does not present
-them as Korean appearance controls.
-
-## Exact horizontal advance rules
-
-`FUN_42093b1a` initializes both context spacing words `+0x14` and `+0x16` to
-1. The active external path uses them as follows.
-
-### Ordinary Hangul and other three-byte text
-
-`FUN_4206ac92`, `FUN_4208115c`, and `FUN_42080708` scan the finished bitmap's
-leftmost and rightmost nonzero columns. The base advance is:
+For ordinary Hangul and other three-byte text, `FUN_4206ac92`,
+`FUN_4208115c`, and `FUN_42080708` scan the finished stored bitmap. The normal
+base advance is:
 
 ```text
-min(cellW, right - left + 1)
+min(cellW, rightInkColumn - leftInkColumn + 1) + 1 px
 ```
 
-`FUN_42080708` then adds context `+0x16`, which is 1 px in this reader context.
-It also offsets the draw so the left ink bound begins at the pen position.
-Consequences:
+The bitmap is offset so its scanned left ink bound starts at the pen position.
+Thus rasterization, crop, threshold, gamma, or embolden can alter Hangul
+spacing by altering the final ink bounds. Stored per-glyph metadata and header
+`fullWidth` do not normally control Hangul in this path.
 
-- normal Hangul advance is `inkWidth + 1 px`, capped before the final `+1`;
-- the stored per-glyph advance metadata does not control normal Hangul;
-- header `fullWidth` does not control normal Hangul in this active path;
-- changing the bitmap raster, crop, embolden, gamma, or threshold can change
-  Hangul spacing because it can change the scanned ink bounds.
-
-### U+0020 space
-
-The active U+0020 branch does not use the serialized ASCII space entry. Its
-advance is exactly:
+U+0020 uses a separate rule:
 
 ```text
 (cellW >> 2) + 1
 ```
 
-For `cellW = 39`, this is 10 px. A stored value of 9 is overwritten by the
-reader's active context behavior.
+For `cellW=39`, the visible word-space advance is 10 px. The serialized ASCII
+space entry does not override this active rule. ASCII uses the rebuilt
+95-entry table; combining marks, joiners, and variation selectors follow the
+zero-width path.
 
-### ASCII
+## Wrapping, alignment, and drawing
 
-When an external font is applied, `FUN_4209810e` rebuilds the 95-entry ASCII
-table. Non-space ASCII receives scanned ink width plus context `+0x14`; the
-draw loop then adds context `+0x16`. U+0020 follows the separate rule above.
+- `FUN_42098c94` performs firmware word/space-aware wrapping.
+- Wrap+Align distributes remaining integer width across eligible internal
+  U+0020 spaces on automatically wrapped lines.
+- Manual/final lines are not expanded by that justification rule.
+- First-line indent is one or two `cellW` units; continuation lines return to
+  the 18 px inset.
+- Left and right alignment do not distribute space slack.
+- EPUB CSS `line-height` is not an input to this native painter.
+- The complete stored XTF cell is painted and clipped only by the framebuffer,
+  not by its horizontal advance box.
 
-Selected non-CJK Unicode ranges can use the firmware's metadata-width path;
-combining marks, joiners, and variation selectors use the zero-width path. The
-diagnostics report the chosen path for every placed code point.
-
-## Wrapping, justification, indent, and alignment
-
-- `FUN_42098c94` performs word/space-aware wrapping rather than browser line
-  layout.
-- Wrap+Align distributes remaining integer pixels across eligible internal
-  U+0020 spaces on automatically wrapped lines. Manual endings and the final
-  line are not expanded.
-- The runtime CJK indent setting moves the first line by one or two `cellW`
-  units. Continued lines start at the normal left inset.
-- Left and right alignment do not distribute word-space slack. EPUB-centred
-  title blocks retain centred placement in the preview.
-- EPUB CSS `line-height` is not the line-step input to this native painter.
-  OpenXTF imports text blocks and the limited alignment/indent semantics that
-  reach this model, but it does not treat arbitrary browser CSS as firmware.
-
-## Bitmap drawing and clipping
-
-The renderer draws the finished stored bitmap at the calculated origin. It is
-not clipped to its horizontal advance. Ink may therefore enter the next advance
-box, cross the 18 px content boundary, or reach the physical framebuffer edge.
-OpenXTF paints the same complete cell and reports these cases separately:
-
-- ink beyond the allocated advance;
-- ink beyond the 444 × 654 reader content region;
-- true clipping outside the 480 × 800 framebuffer; and
-- pixels occupied by glyphs from different lines.
+OpenXTF reports ink beyond advance, content-margin overflow, physical-frame
+clipping, and pixels occupied by glyphs from different lines separately.
 
 ## Korean defaults
 
-The font-file defaults remain:
-
 - RIDI Batang;
-- 29 px raster;
+- 29 px rasterization input;
 - 39 × 38 storage cell;
-- 2bpp;
+- 2 bpp;
 - crop X/Y 0;
 - no embolden;
-- gamma 1.0 and thresholds 64, 128, 192.
+- gamma 1.0 and thresholds 64, 128, 192;
+- runtime layout preview: manual 1.2× lines, 1.5× paragraph boundaries,
+  two-cell first-line indent, Wrap+Align.
 
-The 29 px value is a rasterization input calibrated against the KO fork glyph
-bitmaps. It is not a 150-PPI or 220-PPI conversion and is independent of the
-device's physical panel density.
-
-The KO reference measurements supplied for the same-paragraph and paragraph
-tiers are 43 px and about 64 px. V6.3.15 cannot express 43 from a 38 px cell:
-its available exact steps jump from 38.0 to 45.6. OpenXTF therefore defaults to
-the nearest selectable line tier, 1.2× (45.6 px), and the 1.5× paragraph tier
-(68.4 px origin-to-origin). These are exact firmware results, not photograph
-measurements. Users must select the same runtime values on the device for the
-preview and device pagination to match.
+The 29 px value was calibrated against the KO fork's glyph bitmap appearance.
+It is not a 150-PPI conversion, is not the device's 220 PPI, and is independent
+of the 39 × 38 storage cell.
 
 ## Diagnostic contract
 
-Diagnostics are generated from the same decoded XTF records and placement pass
-as the preview image. They show:
+Diagnostics and the preview image share the same decoded XTF records and page
+placement pass. They expose:
 
-- the exact `cellH × lineSpacingLS` result;
-- the exact `lineStep × paraRatioLS` result and additional whitespace;
-- the exact binary32 word used for the line step, paragraph step, and first Y;
-- every integer line draw origin produced by float accumulation;
-- the 654 px page surface and XTF-derived bottom-row test value;
-- first-line indent, alignment mode, blank EPUB blocks removed, and page usage;
-- per-line widths, U+0020 distribution, and wrap reasons;
-- per-glyph ink bounds, advance source, fallback source, and clipping; and
-- the exact U+0020 formula and the other whitespace paths.
+- initial pagination step and maximum record count;
+- final page-painted step and its exact binary32 word;
+- Auto normal intervals, paragraph intervals, weighted denominator, and 756 px
+  numerator;
+- paragraph step and extra distance;
+- the exact 22…778 origin span, `0.99f` conversion bias, and integer origins;
+- retained EPUB blank blocks and visible empty line records;
+- per-line width, indent, justification, transition, and break reason;
+- per-glyph ink/advance/fallback paths and clipping;
+- the U+0020 formula and other whitespace paths; and
+- page truncation and the first source character assigned to the next page.
 
-The overlay marks line draw origins, not typographic baselines. XTF ascender and
-descender values do not reposition glyphs in this V6.3.15 path.
+The overlay's horizontal guides are draw origins, not typographic baselines.

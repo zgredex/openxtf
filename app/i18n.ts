@@ -49,19 +49,20 @@ export const TRANSLATIONS = {
     referenceAppearance: '완성 XTF 래스터',
     deviceLineSpacing: '기기 줄 간격',
     deviceLineSpacingHelp:
-      'V6.3.15는 셀 높이에 이 배율을 곱하고, 소수 좌표를 누적한 뒤 각 줄을 정수 위치에 그립니다.',
-    lineAuto: '자동 (1.0×)',
+      '자동은 현재 페이지의 실제 줄과 문단 수에 맞춰 22~778px 영역에 줄을 재분배합니다. 숫자 옵션은 셀 높이에 선택한 배율을 곱합니다.',
+    lineAuto: '자동 · 페이지 맞춤',
+    lineAutoDynamic: '자동 · 페이지 내용에 따라 달라짐',
     exactLineAdvance: (cell: number, factor: number, result: number) =>
       `${cell} × ${factor.toFixed(1)} = ${Number(result.toFixed(4))} px`,
     lineTight: (pixels: number) => `좁게 · ${pixels}px`,
     lineNormal: (pixels: number) => `보통 · ${pixels}px (기본)`,
     lineWide: (pixels: number) => `넓게 · ${pixels}px`,
     lineSpacingHint: (pixels: number) =>
-      `미리보기 줄 원점 간격은 정확히 ${pixels}px입니다. 기기에서도 같은 줄 간격 단계를 선택하세요.`,
+      `숫자 옵션의 줄 원점 간격은 ${pixels}px입니다. 자동 옵션은 현재 페이지 내용에 따라 다시 계산됩니다.`,
     deviceLayoutSettings: '기기 레이아웃 설정',
     paragraphGap: '문단 추가 간격',
     paragraphSpacingHelp:
-      '문단의 마지막 줄에서 다음 문단 첫 줄까지의 간격을 줄 진행값의 이 비율로 설정합니다.',
+      '명시적 문단 경계의 원점 간격을 기본 줄 진행값의 이 비율로 설정합니다. 자동 줄 간격에서는 이 비율도 페이지 전체 재분배 계산에 포함됩니다.',
     firstLineIndent: '첫 줄 들여쓰기',
     firstLineIndentHelp:
       '첫 줄을 XTF 셀 너비의 1배 또는 2배만큼 들여씁니다.',
@@ -185,7 +186,7 @@ export const TRANSLATIONS = {
     epubLoaded: (title: string, count: number) =>
       `${title} · 본문 ${count}개`,
     epubPrivacyHint:
-      'EPUB은 브라우저 안에서만 열립니다. V6.3.15처럼 빈 공백 문단은 제외하고 본문 블록을 배치합니다. 이미지와 루비는 재현하지 않습니다.',
+      'EPUB은 브라우저 안에서만 열립니다. V6.3.15의 줄 레코드 동작을 재현하도록 빈 공백 문단도 보존합니다. 이미지와 루비는 재현하지 않습니다.',
     epubInvalidError:
       '이 EPUB을 읽을 수 없습니다. DRM이 없는 표준 EPUB 파일인지 확인하세요. 최대 크기는 100MB입니다.',
     epubEmptyError: 'EPUB의 읽기 순서에서 표시할 본문을 찾지 못했습니다.',
@@ -211,6 +212,8 @@ export const TRANSLATIONS = {
     diagnosticLines: '표시된 줄 / 현재 설정의 최대 줄',
     diagnosticPageCharacters: '배치 글리프 / 입력 문자',
     diagnosticPitch: '줄 원점 진행 공식',
+    diagnosticPaginationPitch: '페이지 구성용 초기 진행값',
+    diagnosticAutoIntervals: '자동 배분 가중 구간',
     diagnosticCell: '글리프 셀',
     diagnosticSpace: '단어 간격',
     diagnosticContentArea: '본문 영역 / 여백',
@@ -225,7 +228,7 @@ export const TRANSLATIONS = {
     diagnosticHeaderFlags: '헤더 플래그 / 메타데이터',
     diagnosticFontCoverage: '전체 글리프 / 범위',
     diagnosticParagraphExtra: '문단 추가 간격',
-    diagnosticIgnoredBlankBlocks: '제외한 빈 EPUB 문단',
+    diagnosticRetainedBlankBlocks: '보존한 빈 EPUB 문단 / 표시 레코드',
     diagnosticCellOverlap: '셀 세로 겹침',
     diagnosticVerticalUse: '사용 / 남은 세로 영역',
     diagnosticCollision: '줄 간 잉크 충돌',
@@ -441,19 +444,20 @@ export const TRANSLATIONS = {
     referenceAppearance: 'Finished XTF raster',
     deviceLineSpacing: 'Device line spacing',
     deviceLineSpacingHelp:
-      'V6.3.15 multiplies cell height by this factor, accumulates the fractional position, then draws each line at an integer coordinate.',
-    lineAuto: 'Auto (1.0×)',
+      "Auto redistributes the current page's actual lines and paragraph boundaries over the 22–778 px span. Numbered choices multiply the XTF cell height by the selected factor.",
+    lineAuto: 'Auto · fit page',
+    lineAutoDynamic: 'Auto · changes with page content',
     exactLineAdvance: (cell: number, factor: number, result: number) =>
       `${cell} × ${factor.toFixed(1)} = ${Number(result.toFixed(4))} px`,
     lineTight: (pixels: number) => `Tight · ${pixels} px`,
     lineNormal: (pixels: number) => `Normal · ${pixels} px (default)`,
     lineWide: (pixels: number) => `Wide · ${pixels} px`,
     lineSpacingHint: (pixels: number) =>
-      `The preview line-origin step is exactly ${pixels} px. Select the same spacing tier on the device.`,
+      `The numbered choice produces a ${pixels} px line-origin step. Auto recalculates it for the current page content.`,
     deviceLayoutSettings: 'Device layout settings',
     paragraphGap: 'Extra paragraph gap',
     paragraphSpacingHelp:
-      'Sets the distance from the last line of one paragraph to the first line of the next as this ratio of the line advance.',
+      "Sets an explicit paragraph boundary's origin distance as this ratio of the base line advance. Auto spacing also includes this ratio in its whole-page distribution.",
     firstLineIndent: 'First-line indent',
     firstLineIndentHelp:
       'Indents the first line by one or two times the XTF cell width.',
@@ -576,7 +580,7 @@ export const TRANSLATIONS = {
     epubLoaded: (title: string, count: number) =>
       `${title} · ${count} reading section${count === 1 ? '' : 's'}`,
     epubPrivacyHint:
-      'The EPUB stays inside your browser. Blank spacer paragraphs are removed and content blocks are laid out like V6.3.15. Images and ruby annotations are not reproduced.',
+      "The EPUB stays inside your browser. Blank spacer paragraphs are retained to reproduce V6.3.15's line records. Images and ruby annotations are not reproduced.",
     epubInvalidError:
       'This EPUB could not be read. Check that it is a standard DRM-free EPUB no larger than 100 MB.',
     epubEmptyError: 'No readable content was found in the EPUB spine.',
@@ -602,6 +606,8 @@ export const TRANSLATIONS = {
     diagnosticLines: 'Visible / maximum lines at current settings',
     diagnosticPageCharacters: 'Placed glyphs / input characters',
     diagnosticPitch: 'Line-origin step formula',
+    diagnosticPaginationPitch: 'Initial pagination step',
+    diagnosticAutoIntervals: 'Auto-distribution weighted intervals',
     diagnosticCell: 'Glyph cell',
     diagnosticSpace: 'Word space',
     diagnosticContentArea: 'Content area / margin',
@@ -616,7 +622,7 @@ export const TRANSLATIONS = {
     diagnosticHeaderFlags: 'Header flags / metadata',
     diagnosticFontCoverage: 'Font glyphs / ranges',
     diagnosticParagraphExtra: 'Extra paragraph gap',
-    diagnosticIgnoredBlankBlocks: 'Ignored empty EPUB paragraphs',
+    diagnosticRetainedBlankBlocks: 'Retained empty EPUB blocks / visible records',
     diagnosticCellOverlap: 'Vertical cell overlap',
     diagnosticVerticalUse: 'Used / remaining vertical area',
     diagnosticCollision: 'Cross-line ink collision',

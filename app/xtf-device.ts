@@ -56,7 +56,7 @@ export type DevicePreviewBlock = {
 export type DevicePreviewOptions = {
   layout?: Partial<DeviceLayoutSettings>;
   blocks?: DevicePreviewBlock[];
-  ignoredBlankBlocks?: number;
+  retainedBlankBlocks?: number;
 };
 
 export const DEFAULT_DEVICE_LAYOUT_SETTINGS: DeviceLayoutSettings = {
@@ -69,14 +69,20 @@ export const DEFAULT_DEVICE_LAYOUT_SETTINGS: DeviceLayoutSettings = {
 // V6.3.15 mode 0 uses an 18 px content inset. Runtime reader settings are
 // separate from the XTF file but are applied here to reproduce the page.
 const PREVIEW_MARGIN = 18;
-// FUN_420aff66 compares the external-font draw Y plus the calibrated glyph
-// bottom against 0x28e. The reading surface is therefore 654 pixels tall;
-// the rest of the 480x800 framebuffer is not another page-text area.
-const V6315_READING_SURFACE_HEIGHT = 0x28e;
-// The external-XTF branch of FUN_420aff66 initializes its floating-point Y
-// accumulator with the exact IEEE-754 value 0x3fe66666 (1.8f), then truncates
-// the accumulator to an integer for each draw call.
-const V6315_EXTERNAL_INITIAL_Y = 1.8;
+// V6.3.15's specialized .xtf reader (FUN_4209810e/FUN_420db6a4) uses a
+// 22 px top origin and the symmetric screen-height - 22 lower origin. Auto
+// spacing distributes the page's actual visual-line records over this span.
+const V6315_SCREEN_WIDTH = 480;
+const V6315_SCREEN_HEIGHT = 800;
+const V6315_FIRST_LINE_Y = 22;
+const V6315_LAST_LINE_Y = V6315_SCREEN_HEIGHT - 22;
+const V6315_AUTO_VERTICAL_SPAN =
+  V6315_LAST_LINE_Y - V6315_FIRST_LINE_Y;
+// Before float-to-int conversion the painter adds this exact binary32 value
+// (0x3f7d70a4), then truncates.
+const V6315_DRAW_ROUNDING_BIAS = Math.fround(0.99);
+// The manual-capacity branch reserves 17 px at the bottom of the framebuffer.
+const V6315_MANUAL_BOTTOM_RESERVE = 17;
 
 const HEADER_SIZE = 64;
 const FLAG_GLYPH_METADATA = 0x02;
@@ -349,29 +355,30 @@ export function renderXtfDevicePreview(
   options: DevicePreviewOptions = {},
 ): FontPreviewResult {
   const xtf = parseXtf(bytes);
-  const width = 480;
-  const height = 800;
+  const width = V6315_SCREEN_WIDTH;
+  const height = V6315_SCREEN_HEIGHT;
   const margin = PREVIEW_MARGIN;
   const layout: DeviceLayoutSettings = {
     ...DEFAULT_DEVICE_LAYOUT_SETTINGS,
     ...options.layout,
   };
-  // V6.3.15 FUN_4209810e stores float(cellH) * lineSpacingLS. The compiled
-  // line-spacing table is exactly 1.0, 1.2, 1.4, 1.6, 1.8, 2.0; the UI calls
-  // the 1.0 entry Auto. Drawing converts each accumulated float Y to int.
+  // Manual choices use float(cellH) * lineSpacingLS. Auto instead establishes
+  // a pagination capacity here, then FUN_420db6a4 redistributes the selected
+  // page's actual line records below.
   const lineSpacingFactor = layout.lineSpacing === 'auto' ? 1 : layout.lineSpacing;
   const firmwareLineSpacingFactor = Math.fround(lineSpacingFactor);
-  const lineAdvance = Math.fround(
-    Math.fround(xtf.header.cellH) * firmwareLineSpacingFactor,
-  );
-  // FUN_420570e4 returns paraRatioLS, and the paragraph painter advances by
-  // ratio * lineAdvance between blocks. Therefore 1x is one normal step, not
-  // one normal step plus another full line.
   const firmwareParagraphRatio = Math.fround(layout.paragraphRatio);
-  const paragraphAdvance = Math.fround(
-    lineAdvance * firmwareParagraphRatio,
-  );
-  const paragraphExtra = Math.fround(paragraphAdvance - lineAdvance);
+  const autoPagination = firmwareAutoPagination(xtf.header.cellH);
+  const initialLineAdvance =
+    layout.lineSpacing === 'auto'
+      ? autoPagination.lineAdvance
+      : Math.fround(
+          Math.fround(xtf.header.cellH) * firmwareLineSpacingFactor,
+        );
+  const maximumWholeLines =
+    layout.lineSpacing === 'auto'
+      ? autoPagination.maximumLines
+      : firmwareManualMaximumLines(xtf.header.cellH, initialLineAdvance);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -386,18 +393,11 @@ export function renderXtfDevicePreview(
   const missingCodePoints = new Set<number>();
   const left = margin;
   const right = width - margin;
-  const top = 0;
-  const bottom = V6315_READING_SURFACE_HEIGHT;
+  const top = V6315_FIRST_LINE_Y;
+  const bottom = V6315_LAST_LINE_Y;
   const contentWidth = right - left;
-  const contentHeight = V6315_READING_SURFACE_HEIGHT;
-  const verticalCalibration = firmwareVerticalCalibration(xtf);
-  const firstLineY = V6315_EXTERNAL_INITIAL_Y;
-  const maximumWholeLines = countWholeLines(
-    firstLineY,
-    bottom,
-    verticalCalibration.bottom,
-    lineAdvance,
-  );
+  const contentHeight = V6315_AUTO_VERTICAL_SPAN;
+  const firstLineY = V6315_FIRST_LINE_Y;
   const lines: NonNullable<FontPreviewResult['device']>['lines'] = [];
   const glyphs: NonNullable<FontPreviewResult['device']>['glyphs'] = [];
 
@@ -454,21 +454,53 @@ export function renderXtfDevicePreview(
     });
   }
 
+  const visiblePlannedLines = selectFirmwarePageLines(
+    plannedLines,
+    layout.lineSpacing,
+    initialLineAdvance,
+    firmwareParagraphRatio,
+    maximumWholeLines,
+    xtf.header.cellH,
+  );
+  const paragraphBoundaryCount = countFirmwareParagraphBoundaries(
+    visiblePlannedLines,
+  );
+  const normalBoundaryCount = Math.max(
+    0,
+    visiblePlannedLines.length - 1 - paragraphBoundaryCount,
+  );
+  const weightedIntervals = Math.fround(
+    Math.fround(normalBoundaryCount) +
+      Math.fround(
+        Math.fround(paragraphBoundaryCount) * firmwareParagraphRatio,
+      ),
+  );
+  const autoDistributed =
+    layout.lineSpacing === 'auto' && visiblePlannedLines.length > 1;
+  const lineAdvance = autoDistributed
+    ? Math.fround(
+        Math.fround(V6315_AUTO_VERTICAL_SPAN) / weightedIntervals,
+      )
+    : initialLineAdvance;
+  const paragraphAdvance = Math.fround(
+    lineAdvance * firmwareParagraphRatio,
+  );
+  const paragraphExtra = Math.fround(paragraphAdvance - lineAdvance);
+
   let penYFloat = Math.fround(firstLineY);
   let renderedSourceIndex = -1;
-  for (let lineIndex = 0; lineIndex < plannedLines.length; lineIndex += 1) {
-    const line = plannedLines[lineIndex];
+  for (let lineIndex = 0; lineIndex < visiblePlannedLines.length; lineIndex += 1) {
+    const line = visiblePlannedLines[lineIndex];
     if (lineIndex > 0) {
-      const previous = plannedLines[lineIndex - 1];
+      const previous = visiblePlannedLines[lineIndex - 1];
       penYFloat = Math.fround(
         penYFloat +
-          (previous.paragraphIndex === line.paragraphIndex
-            ? lineAdvance
-            : paragraphAdvance),
+          (isFirmwareParagraphBoundary(previous, line)
+            ? paragraphAdvance
+            : lineAdvance),
       );
     }
-    const penY = Math.trunc(penYFloat);
-    if (penY + verticalCalibration.bottom > bottom) break;
+    const penY = firmwareDrawCoordinate(penYFloat);
 
     const availableWidth = Math.max(1, contentWidth - line.indent);
     const effectiveAlign =
@@ -486,20 +518,14 @@ export function renderXtfDevicePreview(
     const justification = extraByGlyph.reduce((sum, value) => sum + value, 0);
     const inkRunWidth = line.baseWidth + justification;
     const usedWidth = line.indent + inkRunWidth;
-    const nextLine = plannedLines[lineIndex + 1];
-    const nextLineTop = nextLine
-      ? Math.trunc(
-          Math.fround(
-            penYFloat +
-            (nextLine.paragraphIndex === line.paragraphIndex
-              ? lineAdvance
-              : paragraphAdvance),
-          ),
-        )
-      : penY;
+    const nextLine = visiblePlannedLines[lineIndex + 1];
+    const transitionAdvance =
+      nextLine && isFirmwareParagraphBoundary(line, nextLine)
+        ? paragraphAdvance
+        : lineAdvance;
     const truncatedAfterLine =
-      lineIndex < plannedLines.length - 1 &&
-      nextLineTop + verticalCalibration.bottom > bottom;
+      lineIndex === visiblePlannedLines.length - 1 &&
+      visiblePlannedLines.length < plannedLines.length;
     lines.push({
       index: lineIndex,
       top: penY,
@@ -512,7 +538,7 @@ export function renderXtfDevicePreview(
       usedWidth,
       remainingWidth: Math.max(0, contentWidth - usedWidth),
       breakReason: truncatedAfterLine ? 'page-end' : line.breakReason,
-      lineAdvance,
+      lineAdvance: transitionAdvance,
       indent: line.indent,
       alignment: effectiveAlign,
     });
@@ -617,7 +643,6 @@ export function renderXtfDevicePreview(
         planned.sourceIndex,
       );
     }
-    if (truncatedAfterLine) break;
   }
 
   const image = context.createImageData(width, height);
@@ -670,7 +695,7 @@ export function renderXtfDevicePreview(
   const remainingCharacters = hiddenCharacters.length;
   const lastLine = lines.at(-1);
   const usedHeight = lastLine
-    ? lastLine.top + verticalCalibration.bottom - top
+    ? Math.max(0, lastLine.top - firstLineY)
     : 0;
   let inkCollisionPixels = 0;
   for (const collision of collisionMask) {
@@ -730,16 +755,25 @@ export function renderXtfDevicePreview(
         maximumWholeLines,
         lineSpacing: layout.lineSpacing,
         lineSpacingFactor,
+        initialLineAdvance,
         lineAdvance,
         paragraphRatio: layout.paragraphRatio,
         paragraphAdvance,
+        autoDistributed,
+        weightedIntervals,
+        normalBoundaryCount,
+        paragraphBoundaryCount,
+        blankLineRecords: visiblePlannedLines.filter(
+          (line) => line.glyphs.length === 0,
+        ).length,
         indentChars: layout.indentChars,
         indentPixels: xtf.header.cellW * layout.indentChars,
         alignMode: layout.alignMode,
-        ignoredBlankBlocks: options.ignoredBlankBlocks ?? 0,
+        retainedBlankBlocks: options.retainedBlankBlocks ?? 0,
         firstLineY,
-        pageFitBottomOffset: verticalCalibration.bottom,
-        readingSurfaceHeight: V6315_READING_SURFACE_HEIGHT,
+        lastLineY: V6315_LAST_LINE_Y,
+        drawRoundingBias: V6315_DRAW_ROUNDING_BIAS,
+        readingSurfaceHeight: V6315_AUTO_VERTICAL_SPAN,
       },
       collisionDataUrl,
       pageUsage: {
@@ -762,17 +796,13 @@ function normalizePreviewBlocks(
   supplied: DevicePreviewBlock[] | undefined,
 ) {
   if (supplied?.length) {
-    return supplied
-      .map((block) => ({ ...block, text: block.text.replace(/\r\n?/g, '\n').trim() }))
-      .filter((block) => block.text.length > 0);
+    return supplied.map((block) => ({
+      ...block,
+      text: block.text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' '),
+    }));
   }
   const normalized = text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
-  const blocks = normalized
-    .split(/\n[\t ]*\n+/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => ({ text: block }));
-  return blocks.length ? blocks : [{ text: normalized.trim() }];
+  return normalized.split('\n').map((block) => ({ text: block.trim() }));
 }
 
 function planFirmwareLines(
@@ -861,7 +891,12 @@ function planFirmwareLines(
       currentWidth += glyph.glyph.advance;
     }
   }
-  if (current.length || !output.length || output.at(-1)?.paragraphIndex !== paragraphIndex) {
+  if (
+    current.length ||
+    input.length === 0 ||
+    !output.length ||
+    output.at(-1)?.paragraphIndex !== paragraphIndex
+  ) {
     finish('text-end');
   }
 }
@@ -870,22 +905,112 @@ function glyphRunWidth(glyphs: PlannedGlyph[]) {
   return glyphs.reduce((width, glyph) => width + glyph.glyph.advance, 0);
 }
 
-function countWholeLines(
-  top: number,
-  bottom: number,
-  pageFitBottomOffset: number,
-  lineAdvance: number,
+function firmwareAutoPagination(cellH: number) {
+  // FUN_4209810e: floor((screenH - 44) / cellH), then mode-0's
+  // FUN_4204d434(4) removes two reserved records. The stored initial step is
+  // (screenH - 44) / (records - 1).
+  const rawMaximumLines = Math.trunc(V6315_AUTO_VERTICAL_SPAN / cellH);
+  const maximumLines =
+    rawMaximumLines > 2 ? rawMaximumLines - 2 : Math.max(1, rawMaximumLines);
+  const lineAdvance =
+    maximumLines > 1
+      ? Math.fround(
+          Math.fround(V6315_AUTO_VERTICAL_SPAN) /
+            Math.fround(maximumLines - 1),
+        )
+      : Math.fround(cellH);
+  return { rawMaximumLines, maximumLines, lineAdvance };
+}
+
+function firmwareManualMaximumLines(cellH: number, lineAdvance: number) {
+  // This is FUN_4209810e's manual branch, including the 17 px lower reserve
+  // and its 0.99f comparison bias.
+  const available = Math.fround(
+    V6315_SCREEN_HEIGHT -
+      V6315_MANUAL_BOTTOM_RESERVE -
+      V6315_FIRST_LINE_Y -
+      cellH,
+  );
+  let maximumLines =
+    Math.trunc(
+      Math.fround(available / Math.fround(lineAdvance)),
+    ) + 1;
+  maximumLines = Math.max(1, maximumLines);
+  const limit = Math.fround(
+    Math.fround(V6315_SCREEN_HEIGHT - V6315_MANUAL_BOTTOM_RESERVE) +
+      V6315_DRAW_ROUNDING_BIAS,
+  );
+  while (maximumLines > 1) {
+    const lastOrigin = Math.fround(
+      Math.fround(V6315_FIRST_LINE_Y) +
+        Math.fround(
+          Math.fround(maximumLines - 1) * Math.fround(lineAdvance),
+        ),
+    );
+    const glyphBottom = Math.fround(lastOrigin + Math.fround(cellH));
+    if (glyphBottom <= limit) break;
+    maximumLines -= 1;
+  }
+  return maximumLines;
+}
+
+function selectFirmwarePageLines(
+  lines: PlannedLine[],
+  lineSpacing: DeviceLineSpacing,
+  initialLineAdvance: number,
+  paragraphRatio: number,
+  maximumLines: number,
+  cellH: number,
 ) {
+  const selected = lines.slice(0, Math.max(1, maximumLines));
+  if (lineSpacing === 'auto') return selected;
+
+  // The manual painter can consume additional height at explicit paragraph
+  // transitions. Apply its exact f32 transition and capacity test rather than
+  // showing records below the firmware's lower reserve.
+  const fitted: PlannedLine[] = [];
+  let y = Math.fround(V6315_FIRST_LINE_Y);
+  const limit = Math.fround(
+    Math.fround(V6315_SCREEN_HEIGHT - V6315_MANUAL_BOTTOM_RESERVE) +
+      V6315_DRAW_ROUNDING_BIAS,
+  );
+  for (const line of selected) {
+    if (fitted.length) {
+      const previous = fitted[fitted.length - 1];
+      const advance = isFirmwareParagraphBoundary(previous, line)
+        ? Math.fround(initialLineAdvance * Math.fround(paragraphRatio))
+        : initialLineAdvance;
+      y = Math.fround(y + advance);
+    }
+    if (Math.fround(y + Math.fround(cellH)) > limit) break;
+    fitted.push(line);
+  }
+  return fitted.length ? fitted : selected.slice(0, 1);
+}
+
+function isFirmwareParagraphBoundary(
+  previous: PlannedLine,
+  next: PlannedLine,
+) {
+  return (
+    previous.breakReason === 'manual' &&
+    previous.glyphs.length > 0 &&
+    next.glyphs.length > 0
+  );
+}
+
+function countFirmwareParagraphBoundaries(lines: PlannedLine[]) {
   let count = 0;
-  let y = Math.fround(top);
-  while (
-    Math.trunc(y) + pageFitBottomOffset <= bottom &&
-    count < 10_000
-  ) {
-    count += 1;
-    y = Math.fround(y + lineAdvance);
+  for (let index = 1; index < lines.length; index += 1) {
+    if (isFirmwareParagraphBoundary(lines[index - 1], lines[index])) count += 1;
   }
   return count;
+}
+
+function firmwareDrawCoordinate(value: number) {
+  return Math.trunc(
+    Math.fround(Math.fround(value) + V6315_DRAW_ROUNDING_BIAS),
+  );
 }
 
 function parseXtf(input: Uint8Array | ArrayBuffer): ParsedXtf {
@@ -1259,68 +1384,6 @@ function glyphInkLeft(record: Uint8Array, xtf: ParsedXtf) {
     }
   }
   return -1;
-}
-
-function glyphInkVerticalBounds(record: Uint8Array, xtf: ParsedXtf) {
-  let top = xtf.header.cellH;
-  let bottom = -1;
-  for (let y = 0; y < xtf.header.cellH; y += 1) {
-    for (let x = 0; x < xtf.header.cellW; x += 1) {
-      if (
-        readBitmapPixel(
-          record,
-          xtf.header.metadataBytes,
-          xtf.header.rowStride,
-          xtf.header.bpp,
-          x,
-          y,
-        )
-      ) {
-        top = Math.min(top, y);
-        bottom = Math.max(bottom, y);
-      }
-    }
-  }
-  return bottom < 0 ? null : { top, bottom };
-}
-
-function firmwareVerticalCalibration(xtf: ParsedXtf) {
-  // In FUN_4209810e's active external-font apply path, the firmware measures
-  // exactly three samples: "align", "n", and U+6211 (我). It sums each run's
-  // top and bottom ink rows, divides both sums by three, subtracts two from the
-  // averaged top, and stores bottom-top as ctx+0x10. FUN_420aff66 uses the
-  // averaged bottom (ctx+0x0a) for its 0x28e page-end test.
-  const samples = ['align', 'n', '\u6211'];
-  let topSum = 0;
-  let bottomSum = 0;
-  for (const sample of samples) {
-    let runTop = xtf.header.cellH;
-    let runBottom = -1;
-    for (const character of Array.from(sample)) {
-      const codePoint = character.codePointAt(0);
-      if (codePoint === undefined) continue;
-      const resolved = resolveFirmwareGlyph(xtf, codePoint);
-      if (resolved.generatedBox) {
-        runTop = 0;
-        runBottom = Math.max(runBottom, xtf.header.cellH - 1);
-        continue;
-      }
-      if (!resolved.record) continue;
-      const bounds = glyphInkVerticalBounds(resolved.record, xtf);
-      if (!bounds) continue;
-      runTop = Math.min(runTop, bounds.top);
-      runBottom = Math.max(runBottom, bounds.bottom);
-    }
-    topSum += runBottom < 0 ? 0 : runTop;
-    bottomSum += Math.max(0, runBottom);
-  }
-  const top = Math.trunc(topSum / samples.length) - 2;
-  const bottom = Math.trunc(bottomSum / samples.length);
-  return {
-    top,
-    bottom,
-    height: Math.max(0, bottom - top),
-  };
 }
 
 function glyphInkBounds(
