@@ -16,10 +16,12 @@ import { TRANSLATIONS } from './i18n';
 import type { Language } from './i18n';
 import {
   applyKoreanX4Profile,
+  DEFAULT_DEVICE_LAYOUT_SETTINGS,
   DEFAULT_KOREAN_X4_SETTINGS,
   renderXtfDevicePreview,
 } from './xtf-device';
 import type {
+  DeviceLayoutSettings,
   KoreanX4Settings,
   TypographyProfile,
 } from './xtf-device';
@@ -80,6 +82,8 @@ const DIAGNOSTIC_ADVANCE_SOURCES = [
   'ascii-width',
   'full-width',
   'glyph-metadata',
+  'ink-bounds',
+  'cell-quarter-space',
   'zero-width',
   'tab-width',
 ] as const;
@@ -127,6 +131,9 @@ export default function OpenXtfClient() {
   const [previewText, setPreviewText] = useState(PREVIEW_TEXT);
   const [epubBook, setEpubBook] = useState<EpubBook | null>(null);
   const [epubSectionIndex, setEpubSectionIndex] = useState(0);
+  const [epubTextEdited, setEpubTextEdited] = useState(false);
+  const [deviceLayoutSettings, setDeviceLayoutSettings] =
+    useState<DeviceLayoutSettings>(DEFAULT_DEVICE_LAYOUT_SETTINGS);
   const [epubLoading, setEpubLoading] = useState(false);
   const [epubError, setEpubError] = useState('');
   const [preview, setPreview] = useState<FontPreviewResult | null>(null);
@@ -155,6 +162,21 @@ export default function OpenXtfClient() {
   const copy = TRANSLATIONS[language];
   const koreanProfileActive =
     typographyProfile === 'korean-x4' && format === 'xtf';
+  const selectedEpubSection = epubBook?.sections[epubSectionIndex] ?? null;
+  const previewBlocks = useMemo(
+    () =>
+      selectedEpubSection && !epubTextEdited
+        ? selectedEpubSection.blocks.map((block, index) => ({
+            text: block.text,
+            tag: block.tag,
+            textAlign: block.textAlign,
+            suppressIndent:
+              block.suppressIndent ||
+              (index === 0 && block.textAlign === 'center'),
+          }))
+        : undefined,
+    [selectedEpubSection, epubTextEdited],
+  );
 
   const actualThresholds =
     thresholdMode === 'symmetric'
@@ -166,7 +188,11 @@ export default function OpenXtfClient() {
   const defaultCharacterCount = uniqueCodePointCount(defaultCharacters);
   const extraCharacterCount = uniqueCodePointCount(extraCharacters);
   const totalCharacterCount = uniqueCodePointCount(allCharacters);
-  const koreanSpaceWidth = koreanSettings.spaceWidth;
+  const deviceLineFactor =
+    deviceLayoutSettings.lineSpacing === 'auto'
+      ? 1
+      : deviceLayoutSettings.lineSpacing;
+  const deviceLineAdvance = koreanSettings.cellH * deviceLineFactor;
   const missingSample = missingCps
     .slice(0, 40)
     .map((cp) => String.fromCodePoint(cp))
@@ -297,6 +323,11 @@ export default function OpenXtfClient() {
             profiledPreview.bytes,
             previewText,
             fontSize,
+            {
+              layout: deviceLayoutSettings,
+              blocks: previewBlocks,
+              ignoredBlankBlocks: selectedEpubSection?.ignoredBlankBlocks,
+            },
           );
         } else {
           rendered = await worker.preview({
@@ -356,6 +387,9 @@ export default function OpenXtfClient() {
     language,
     typographyProfile,
     koreanSettings,
+    deviceLayoutSettings,
+    previewBlocks,
+    selectedEpubSection,
   ]);
 
   function makeOptions() {
@@ -436,10 +470,12 @@ export default function OpenXtfClient() {
       const book = await readEpub(file);
       setEpubBook(book);
       setEpubSectionIndex(0);
+      setEpubTextEdited(false);
       setPreviewText(book.sections[0].text);
     } catch (reason) {
       setEpubBook(null);
       setEpubSectionIndex(0);
+      setEpubTextEdited(false);
       setEpubError(
         reason instanceof Error && reason.message === 'OPENXTF_EMPTY_EPUB'
           ? copy.epubEmptyError
@@ -453,12 +489,14 @@ export default function OpenXtfClient() {
   function chooseEpubSection(index: number) {
     if (!epubBook?.sections[index]) return;
     setEpubSectionIndex(index);
+    setEpubTextEdited(false);
     setPreviewText(epubBook.sections[index].text);
   }
 
   function clearEpub() {
     setEpubBook(null);
     setEpubSectionIndex(0);
+    setEpubTextEdited(false);
     setEpubError('');
     setPreviewText(PREVIEW_TEXT);
   }
@@ -489,6 +527,7 @@ export default function OpenXtfClient() {
     setSystemFallback(false);
     setFileNamePattern(DEFAULT_OUTPUT_PATTERN);
     setKoreanSettings(DEFAULT_KOREAN_X4_SETTINGS);
+    setDeviceLayoutSettings(DEFAULT_DEVICE_LAYOUT_SETTINGS);
     setResults([]);
     void chooseReadyFont(READY_FONTS[0]);
   }
@@ -515,6 +554,13 @@ export default function OpenXtfClient() {
   ) {
     setKoreanSettings((current) => ({ ...current, [key]: value }));
     setResults([]);
+  }
+
+  function updateDeviceLayoutSetting<K extends keyof DeviceLayoutSettings>(
+    key: K,
+    value: DeviceLayoutSettings[K],
+  ) {
+    setDeviceLayoutSettings((current) => ({ ...current, [key]: value }));
   }
 
   function toggleDark() {
@@ -571,6 +617,11 @@ export default function OpenXtfClient() {
             result.bytes,
             previewText,
             result.summary.fontSize,
+            {
+              layout: deviceLayoutSettings,
+              blocks: previewBlocks,
+              ignoredBlankBlocks: selectedEpubSection?.ignoredBlankBlocks,
+            },
           ),
         );
       }
@@ -629,6 +680,9 @@ export default function OpenXtfClient() {
   const diagnosticLines = diagnosticDevice?.lines ?? [];
   const diagnosticGlyphs = diagnosticDevice?.glyphs ?? [];
   const diagnosticSpaces = diagnosticDevice?.spaces ?? [];
+  const diagnosticWordSpace =
+    diagnosticSpaces.find((space) => space.codePoint === 0x20)?.advance ??
+    ((koreanSettings.cellW >> 2) + 1);
   const diagnosticHeader = diagnosticDevice?.xtfHeader;
   const diagnosticLayout = diagnosticDevice?.layout;
   const diagnosticPage = diagnosticDevice?.pageUsage;
@@ -1048,44 +1102,6 @@ export default function OpenXtfClient() {
                     </label>
                   </section>
 
-                  <section className="appearance-group">
-                    <p className="appearance-group-title">
-                      {copy.textSpacingAndRhythm}
-                    </p>
-                    <div className="settings-grid">
-                      <NumberField
-                        label={copy.fullWidthAdvance}
-                        value={koreanSettings.fullWidth}
-                        min={1}
-                        max={255}
-                        step={1}
-                        suffix="px"
-                        help={copy.fullWidthAdvanceHelp}
-                        onChange={(value) => updateKoreanSetting('fullWidth', value)}
-                      />
-                      <NumberField
-                        label={copy.effectiveWordSpace}
-                        value={koreanSettings.spaceWidth}
-                        min={1}
-                        max={255}
-                        step={1}
-                        suffix="px"
-                        help={copy.wordSpaceHelp}
-                        onChange={(value) => updateKoreanSetting('spaceWidth', value)}
-                      />
-                      <NumberField
-                        label={copy.storedAdvanceY}
-                        value={koreanSettings.advanceY}
-                        min={1}
-                        max={255}
-                        step={1}
-                        suffix="px"
-                        help={copy.advanceYHelp}
-                        onChange={(value) => updateKoreanSetting('advanceY', value)}
-                      />
-                    </div>
-                  </section>
-
                   <section className="appearance-group space-y-4">
                     <p className="appearance-group-title">
                       {copy.strokeAppearance}
@@ -1423,11 +1439,119 @@ export default function OpenXtfClient() {
                   <p className="hint">{copy.epubPrivacyHint}</p>
                 </div>
               ) : null}
+              {koreanProfileActive ? (
+                <section className="device-reader-layout">
+                  <div className="device-reader-layout-heading">
+                    <div>
+                      <p className="field-label">{copy.deviceLayoutSettings}</p>
+                      <p className="hint">{copy.deviceOnlySettingsHint}</p>
+                    </div>
+                    <span className="device-layout-result">
+                      {copy.exactLineAdvance(
+                        koreanSettings.cellH,
+                        deviceLineFactor,
+                        deviceLineAdvance,
+                      )}
+                    </span>
+                  </div>
+                  <div className="device-reader-layout-grid">
+                    <label title={copy.deviceLineSpacingHelp}>
+                      <SettingLabel
+                        label={copy.deviceLineSpacing}
+                        help={copy.deviceLineSpacingHelp}
+                      />
+                      <select
+                        className="input"
+                        value={deviceLayoutSettings.lineSpacing}
+                        onChange={(event) =>
+                          updateDeviceLayoutSetting(
+                            'lineSpacing',
+                            event.target.value === 'auto'
+                              ? 'auto'
+                              : (Number(event.target.value) as DeviceLayoutSettings['lineSpacing']),
+                          )
+                        }
+                      >
+                        <option value="auto">{copy.lineAuto}</option>
+                        {[1.2, 1.4, 1.6, 1.8, 2].map((factor) => (
+                          <option value={factor} key={factor}>
+                            {factor.toFixed(1)}×
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label title={copy.paragraphSpacingHelp}>
+                      <SettingLabel
+                        label={copy.paragraphGap}
+                        help={copy.paragraphSpacingHelp}
+                      />
+                      <select
+                        className="input"
+                        value={deviceLayoutSettings.paragraphRatio}
+                        onChange={(event) =>
+                          updateDeviceLayoutSetting(
+                            'paragraphRatio',
+                            Number(event.target.value) as DeviceLayoutSettings['paragraphRatio'],
+                          )
+                        }
+                      >
+                        {[1, 1.25, 1.5, 1.75, 2].map((ratio) => (
+                          <option value={ratio} key={ratio}>
+                            {ratio.toFixed(ratio % 1 ? 2 : 0)}×
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label title={copy.firstLineIndentHelp}>
+                      <SettingLabel
+                        label={copy.firstLineIndent}
+                        help={copy.firstLineIndentHelp}
+                      />
+                      <select
+                        className="input"
+                        value={deviceLayoutSettings.indentChars}
+                        onChange={(event) =>
+                          updateDeviceLayoutSetting(
+                            'indentChars',
+                            Number(event.target.value) as DeviceLayoutSettings['indentChars'],
+                          )
+                        }
+                      >
+                        <option value={2}>{copy.indentTwo}</option>
+                        <option value={1}>{copy.indentOne}</option>
+                      </select>
+                    </label>
+                    <label title={copy.alignModeHelp}>
+                      <SettingLabel
+                        label={copy.alignMode}
+                        help={copy.alignModeHelp}
+                      />
+                      <select
+                        className="input"
+                        value={deviceLayoutSettings.alignMode}
+                        onChange={(event) =>
+                          updateDeviceLayoutSetting(
+                            'alignMode',
+                            event.target.value as DeviceLayoutSettings['alignMode'],
+                          )
+                        }
+                      >
+                        <option value="wrap-align">{copy.wrapAlign}</option>
+                        <option value="right">{copy.rightAlign}</option>
+                        <option value="left">{copy.leftAlign}</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+              ) : null}
               <textarea
                 className="input preview-text-input"
                 rows={2}
                 value={previewText}
-                onChange={(event) => setPreviewText(event.target.value)}
+                onChange={(event) => {
+                  setPreviewText(event.target.value);
+                  if (epubBook) setEpubTextEdited(true);
+                }}
               />
               <div className="preview-frame" aria-busy={previewLoading}>
                 {preview?.dataUrl ? (
@@ -1496,7 +1620,7 @@ export default function OpenXtfClient() {
                             <span
                               className="diagnostic-baseline"
                               style={{
-                                top: `${((lineTop + diagnosticMetrics.contentBaseline) / diagnosticDevice.height) * 100}%`,
+                                top: `${(lineTop / diagnosticDevice.height) * 100}%`,
                               }}
                               key={`${lineTop}-${index}`}
                             >
@@ -1576,8 +1700,9 @@ export default function OpenXtfClient() {
                       <div>
                         <dt>{copy.diagnosticPitch}</dt>
                         <dd>
-                          {diagnosticHeader
-                            ? `${diagnosticHeader.storedAdvanceY} → ${diagnosticHeader.effectiveAdvanceY} px`
+                          {diagnosticLayout?.lineAdvance !== undefined &&
+                          diagnosticLayout.lineSpacingFactor !== undefined
+                            ? `${preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
                             : `${preview.metrics.advanceY} px`}
                         </dd>
                       </div>
@@ -1597,18 +1722,54 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
-                        <dt>{copy.diagnosticHeaderAdvances}</dt>
+                        <dt>{copy.diagnosticParagraphAdvance}</dt>
                         <dd>
-                          {diagnosticHeader
-                            ? `${diagnosticHeader.fullWidth} / ${diagnosticHeader.asciiWidth} px`
+                          {diagnosticLayout?.paragraphAdvance !== undefined &&
+                          diagnosticLayout.paragraphRatio !== undefined
+                            ? `${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} × ${formatFirmwareNumber(diagnosticLayout.paragraphRatio, language)} = ${formatFirmwareNumber(diagnosticLayout.paragraphAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.paragraphAdvance)}`
                             : '—'}
                         </dd>
                       </div>
                       <div>
-                        <dt>{copy.diagnosticBaselineMetrics}</dt>
+                        <dt>{copy.diagnosticIndent}</dt>
                         <dd>
-                          {diagnosticHeader
-                            ? `${diagnosticHeader.ascender} / ${diagnosticHeader.descender} px`
+                          {diagnosticLayout?.indentPixels !== undefined &&
+                          diagnosticLayout.indentChars !== undefined
+                            ? `${diagnosticLayout.indentChars} × ${preview.metrics.cellW} = ${diagnosticLayout.indentPixels} px`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticAlignment}</dt>
+                        <dd>
+                          {diagnosticLayout?.alignMode === 'wrap-align'
+                            ? copy.wrapAlign
+                            : diagnosticLayout?.alignMode === 'right'
+                              ? copy.rightAlign
+                              : diagnosticLayout?.alignMode === 'left'
+                                ? copy.leftAlign
+                                : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticSpace}</dt>
+                        <dd>
+                          ({preview.metrics.cellW} &gt;&gt; 2) + 1 ={' '}
+                          {diagnosticWordSpace} px
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticPageLimit}</dt>
+                        <dd>
+                          {diagnosticLayout?.readingSurfaceHeight ?? '—'} px · +
+                          {diagnosticLayout?.pageFitBottomOffset ?? '—'} px
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticFirstLineY}</dt>
+                        <dd>
+                          {diagnosticLayout?.firstLineY !== undefined
+                            ? `${formatFirmwareNumber(diagnosticLayout.firstLineY, language)} · f32 ${float32Hex(diagnosticLayout.firstLineY)} → ${Math.trunc(Math.fround(diagnosticLayout.firstLineY))} px`
                             : '—'}
                         </dd>
                       </div>
@@ -1638,7 +1799,19 @@ export default function OpenXtfClient() {
                       </div>
                       <div>
                         <dt>{copy.diagnosticParagraphExtra}</dt>
-                        <dd>{diagnosticLayout?.paragraphExtra ?? '—'} px</dd>
+                        <dd>
+                          {diagnosticLayout?.paragraphExtra !== undefined
+                            ? formatFirmwareNumber(
+                                diagnosticLayout.paragraphExtra,
+                                language,
+                              )
+                            : '—'}{' '}
+                          px
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticIgnoredBlankBlocks}</dt>
+                        <dd>{diagnosticLayout?.ignoredBlankBlocks ?? 0}</dd>
                       </div>
                       <div>
                         <dt>{copy.diagnosticCellOverlap}</dt>
@@ -1792,6 +1965,9 @@ export default function OpenXtfClient() {
                             <th>{copy.diagnosticText}</th>
                             <th>{copy.diagnosticBreak}</th>
                             <th>{copy.diagnosticTopBaseline}</th>
+                            <th>{copy.diagnosticLineAdvance}</th>
+                            <th>{copy.diagnosticIndent}</th>
+                            <th>{copy.diagnosticAlignment}</th>
                             <th>{copy.diagnosticCharacters}</th>
                             <th>{copy.diagnosticBaseWidth}</th>
                             <th>{copy.diagnosticJustification}</th>
@@ -1804,7 +1980,23 @@ export default function OpenXtfClient() {
                               <td>{line.index + 1}</td>
                               <td className="diagnostic-text-cell">{line.text || '—'}</td>
                               <td>{copy.diagnosticBreakReasons[line.breakReason]}</td>
-                              <td>{line.top} / {line.baseline}</td>
+                              <td>{line.top} px</td>
+                              <td>
+                                {line.lineAdvance !== undefined
+                                  ? formatFirmwareNumber(line.lineAdvance, language)
+                                  : '—'}{' '}
+                                px
+                              </td>
+                              <td>{line.indent ?? 0} px</td>
+                              <td>
+                                {line.alignment === 'center'
+                                  ? copy.centerAlign
+                                  : line.alignment === 'wrap-align'
+                                    ? copy.wrapAlign
+                                    : line.alignment === 'right'
+                                      ? copy.rightAlign
+                                      : copy.leftAlign}
+                              </td>
                               <td>{line.characterCount}</td>
                               <td>{line.baseWidth ?? line.usedWidth} px</td>
                               <td>
@@ -1912,7 +2104,7 @@ export default function OpenXtfClient() {
                     ? copy.koreanPreviewDetails(
                         preview.device.lineCount,
                         preview.metrics.advanceY,
-                        koreanSpaceWidth,
+                        diagnosticWordSpace,
                         preview.device.inkCollisionRows,
                       )
                     : copy.previewDetails(
@@ -2353,6 +2545,20 @@ function uniqueCodePointCount(text: string) {
 
 function formatLocaleNumber(value: number, language: Language) {
   return value.toLocaleString(language === 'ko' ? 'ko-KR' : 'en-US');
+}
+
+function formatFirmwareNumber(value: number, language: Language) {
+  return value.toLocaleString(language === 'ko' ? 'ko-KR' : 'en-US', {
+    maximumFractionDigits: 4,
+    useGrouping: false,
+  });
+}
+
+function float32Hex(value: number) {
+  const bytes = new ArrayBuffer(4);
+  const view = new DataView(bytes);
+  view.setFloat32(0, value, false);
+  return `0x${view.getUint32(0, false).toString(16).padStart(8, '0').toUpperCase()}`;
 }
 
 function applyOutputFileName(

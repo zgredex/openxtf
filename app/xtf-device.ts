@@ -34,13 +34,55 @@ export const DEFAULT_KOREAN_X4_SETTINGS: KoreanX4Settings = {
   strictCrop: true,
 };
 
-// V6.3.15 mode 0 uses an 18 px content inset. Reader/EPUB styling can apply
-// additional line and paragraph spacing, but those values are not XTF data.
+export type DeviceLineSpacing = 'auto' | 1.2 | 1.4 | 1.6 | 1.8 | 2;
+export type DeviceParagraphRatio = 1 | 1.25 | 1.5 | 1.75 | 2;
+export type DeviceIndentChars = 1 | 2;
+export type DeviceAlignMode = 'wrap-align' | 'right' | 'left';
+
+export type DeviceLayoutSettings = {
+  lineSpacing: DeviceLineSpacing;
+  paragraphRatio: DeviceParagraphRatio;
+  indentChars: DeviceIndentChars;
+  alignMode: DeviceAlignMode;
+};
+
+export type DevicePreviewBlock = {
+  text: string;
+  tag?: string;
+  textAlign?: 'left' | 'right' | 'center' | 'justify';
+  suppressIndent?: boolean;
+};
+
+export type DevicePreviewOptions = {
+  layout?: Partial<DeviceLayoutSettings>;
+  blocks?: DevicePreviewBlock[];
+  ignoredBlankBlocks?: number;
+};
+
+export const DEFAULT_DEVICE_LAYOUT_SETTINGS: DeviceLayoutSettings = {
+  lineSpacing: 1.2,
+  paragraphRatio: 1.5,
+  indentChars: 2,
+  alignMode: 'wrap-align',
+};
+
+// V6.3.15 mode 0 uses an 18 px content inset. Runtime reader settings are
+// separate from the XTF file but are applied here to reproduce the page.
 const PREVIEW_MARGIN = 18;
-const PREVIEW_PARAGRAPH_GAP_FACTOR = 0.5;
+// FUN_420aff66 compares the external-font draw Y plus the calibrated glyph
+// bottom against 0x28e. The reading surface is therefore 654 pixels tall;
+// the rest of the 480x800 framebuffer is not another page-text area.
+const V6315_READING_SURFACE_HEIGHT = 0x28e;
+// The external-XTF branch of FUN_420aff66 initializes its floating-point Y
+// accumulator with the exact IEEE-754 value 0x3fe66666 (1.8f), then truncates
+// the accumulator to an integer for each draw call.
+const V6315_EXTERNAL_INITIAL_Y = 1.8;
 
 const HEADER_SIZE = 64;
 const FLAG_GLYPH_METADATA = 0x02;
+// FUN_42093b1a initializes ctx+0x16 to 1. FUN_42080708 adds it to ordinary
+// three-byte text (including Hangul), ASCII, and U+0020.
+const V6315_CHARACTER_SPACING = 1;
 
 type XtfHeader = {
   bpp: 1 | 2;
@@ -82,6 +124,8 @@ type FirmwareAdvanceSource =
   | 'ascii-width'
   | 'full-width'
   | 'glyph-metadata'
+  | 'ink-bounds'
+  | 'cell-quarter-space'
   | 'zero-width'
   | 'tab-width';
 
@@ -116,6 +160,9 @@ type PlannedLine = {
   glyphs: PlannedGlyph[];
   baseWidth: number;
   breakReason: 'automatic' | 'manual' | 'text-end';
+  paragraphIndex: number;
+  indent: number;
+  textAlign?: DevicePreviewBlock['textAlign'];
 };
 
 export type XtfProfileReport = {
@@ -299,19 +346,32 @@ export function renderXtfDevicePreview(
   bytes: Uint8Array | ArrayBuffer,
   text: string,
   rasterSize: number,
+  options: DevicePreviewOptions = {},
 ): FontPreviewResult {
   const xtf = parseXtf(bytes);
   const width = 480;
   const height = 800;
   const margin = PREVIEW_MARGIN;
-  // FUN_4204251c returns advanceY, falling back to cellH only when it is 0.
-  // The reader's lineSpacingLS multiplier is not XTF data; the neutral font
-  // preview therefore uses the stored metric directly.
-  const linePitch = Math.max(1, xtf.header.advanceY || xtf.header.cellH);
-  const paragraphExtra = Math.max(
-    0,
-    Math.trunc(linePitch * PREVIEW_PARAGRAPH_GAP_FACTOR),
+  const layout: DeviceLayoutSettings = {
+    ...DEFAULT_DEVICE_LAYOUT_SETTINGS,
+    ...options.layout,
+  };
+  // V6.3.15 FUN_4209810e stores float(cellH) * lineSpacingLS. The compiled
+  // line-spacing table is exactly 1.0, 1.2, 1.4, 1.6, 1.8, 2.0; the UI calls
+  // the 1.0 entry Auto. Drawing converts each accumulated float Y to int.
+  const lineSpacingFactor = layout.lineSpacing === 'auto' ? 1 : layout.lineSpacing;
+  const firmwareLineSpacingFactor = Math.fround(lineSpacingFactor);
+  const lineAdvance = Math.fround(
+    Math.fround(xtf.header.cellH) * firmwareLineSpacingFactor,
   );
+  // FUN_420570e4 returns paraRatioLS, and the paragraph painter advances by
+  // ratio * lineAdvance between blocks. Therefore 1x is one normal step, not
+  // one normal step plus another full line.
+  const firmwareParagraphRatio = Math.fround(layout.paragraphRatio);
+  const paragraphAdvance = Math.fround(
+    lineAdvance * firmwareParagraphRatio,
+  );
+  const paragraphExtra = Math.fround(paragraphAdvance - lineAdvance);
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -326,93 +386,124 @@ export function renderXtfDevicePreview(
   const missingCodePoints = new Set<number>();
   const left = margin;
   const right = width - margin;
-  const bottom = height - margin;
+  const top = 0;
+  const bottom = V6315_READING_SURFACE_HEIGHT;
   const contentWidth = right - left;
-  const contentHeight = bottom - margin;
-  const maximumWholeLines =
-    xtf.header.cellH > contentHeight
-      ? 0
-      : 1 + Math.floor((contentHeight - xtf.header.cellH) / linePitch);
+  const contentHeight = V6315_READING_SURFACE_HEIGHT;
+  const verticalCalibration = firmwareVerticalCalibration(xtf);
+  const firstLineY = V6315_EXTERNAL_INITIAL_Y;
+  const maximumWholeLines = countWholeLines(
+    firstLineY,
+    bottom,
+    verticalCalibration.bottom,
+    lineAdvance,
+  );
   const lines: NonNullable<FontPreviewResult['device']>['lines'] = [];
   const glyphs: NonNullable<FontPreviewResult['device']>['glyphs'] = [];
 
-  const normalizedText = text.replace(/\r\n?/g, '\n');
-  const characters = Array.from(normalizedText);
-  const totalCharacters = characters.reduce(
-    (count, character) => count + (character === '\n' ? 0 : 1),
-    0,
-  );
+  const previewBlocks = normalizePreviewBlocks(text, options.blocks);
+  const sourceCharacters: string[] = [];
   const plannedLines: PlannedLine[] = [];
-  let currentGlyphs: PlannedGlyph[] = [];
-  let currentWidth = 0;
-
-  const finishPlannedLine = (breakReason: PlannedLine['breakReason']) => {
+  let sourceIndex = 0;
+  for (let paragraphIndex = 0; paragraphIndex < previewBlocks.length; paragraphIndex += 1) {
+    const block = previewBlocks[paragraphIndex];
+    const blockLines = block.text.replace(/\r\n?/g, '\n').split('\n');
+    for (let manualIndex = 0; manualIndex < blockLines.length; manualIndex += 1) {
+      const paragraphGlyphs: PlannedGlyph[] = [];
+      for (const character of Array.from(blockLines[manualIndex])) {
+        const codePoint = character.codePointAt(0);
+        if (codePoint === undefined) continue;
+        sourceCharacters.push(character);
+        const glyph = resolveFirmwareGlyph(xtf, codePoint);
+        if (glyph.missing && !isLayoutWhitespace(codePoint)) {
+          missingCodePoints.add(codePoint);
+        }
+        paragraphGlyphs.push({ character, codePoint, sourceIndex, glyph });
+        sourceIndex += 1;
+      }
+      const suppressIndent =
+        block.suppressIndent ||
+        block.textAlign === 'center' ||
+        /^h[1-6]$/.test(block.tag || '');
+      planFirmwareLines(
+        paragraphGlyphs,
+        paragraphIndex,
+        suppressIndent ? 0 : xtf.header.cellW * layout.indentChars,
+        contentWidth,
+        block.textAlign,
+        plannedLines,
+      );
+      if (manualIndex < blockLines.length - 1) {
+        const last = plannedLines.at(-1);
+        if (last) last.breakReason = 'manual';
+      }
+    }
+    const last = plannedLines.at(-1);
+    if (last) {
+      last.breakReason =
+        paragraphIndex < previewBlocks.length - 1 ? 'manual' : 'text-end';
+    }
+  }
+  if (!plannedLines.length) {
     plannedLines.push({
-      glyphs: currentGlyphs,
-      baseWidth: currentWidth,
-      breakReason,
+      glyphs: [],
+      baseWidth: 0,
+      breakReason: 'text-end',
+      paragraphIndex: 0,
+      indent: 0,
     });
-    currentGlyphs = [];
-    currentWidth = 0;
-  };
-
-  for (
-    let characterIndex = 0;
-    characterIndex < characters.length;
-    characterIndex += 1
-  ) {
-    const character = characters[characterIndex];
-    if (character === '\n') {
-      finishPlannedLine('manual');
-      continue;
-    }
-    const codePoint = character.codePointAt(0);
-    if (codePoint === undefined) continue;
-    const glyph = resolveFirmwareGlyph(xtf, codePoint);
-    if (glyph.missing && !isLayoutWhitespace(codePoint)) {
-      missingCodePoints.add(codePoint);
-    }
-    if (currentGlyphs.length && currentWidth + glyph.advance > contentWidth) {
-      finishPlannedLine('automatic');
-      if (codePoint === 0x20) continue;
-    }
-    currentGlyphs.push({
-      character,
-      codePoint,
-      sourceIndex: characterIndex,
-      glyph,
-    });
-    currentWidth += glyph.advance;
-  }
-  if (currentGlyphs.length || !plannedLines.length) {
-    finishPlannedLine('text-end');
   }
 
-  let penY = margin;
-  let previousBreak: PlannedLine['breakReason'] | null = null;
+  let penYFloat = Math.fround(firstLineY);
   let renderedSourceIndex = -1;
   for (let lineIndex = 0; lineIndex < plannedLines.length; lineIndex += 1) {
     const line = plannedLines[lineIndex];
     if (lineIndex > 0) {
-      penY += linePitch;
-      if (previousBreak === 'manual') penY += paragraphExtra;
+      const previous = plannedLines[lineIndex - 1];
+      penYFloat = Math.fround(
+        penYFloat +
+          (previous.paragraphIndex === line.paragraphIndex
+            ? lineAdvance
+            : paragraphAdvance),
+      );
     }
-    if (penY + xtf.header.cellH > bottom) break;
+    const penY = Math.trunc(penYFloat);
+    if (penY + verticalCalibration.bottom > bottom) break;
 
-    const extraByGlyph = firmwareJustification(line, contentWidth);
+    const availableWidth = Math.max(1, contentWidth - line.indent);
+    const effectiveAlign =
+      line.textAlign === 'center'
+        ? 'center'
+        : layout.alignMode === 'right'
+          ? 'right'
+          : layout.alignMode === 'left'
+            ? 'left'
+            : 'wrap-align';
+    const extraByGlyph =
+      effectiveAlign === 'wrap-align'
+        ? firmwareJustification(line, availableWidth)
+        : new Array(line.glyphs.length).fill(0) as number[];
     const justification = extraByGlyph.reduce((sum, value) => sum + value, 0);
-    const usedWidth = line.baseWidth + justification;
-    const nextLineTop =
-      penY +
-      linePitch +
-      (line.breakReason === 'manual' ? paragraphExtra : 0);
+    const inkRunWidth = line.baseWidth + justification;
+    const usedWidth = line.indent + inkRunWidth;
+    const nextLine = plannedLines[lineIndex + 1];
+    const nextLineTop = nextLine
+      ? Math.trunc(
+          Math.fround(
+            penYFloat +
+            (nextLine.paragraphIndex === line.paragraphIndex
+              ? lineAdvance
+              : paragraphAdvance),
+          ),
+        )
+      : penY;
     const truncatedAfterLine =
       lineIndex < plannedLines.length - 1 &&
-      nextLineTop + xtf.header.cellH > bottom;
+      nextLineTop + verticalCalibration.bottom > bottom;
     lines.push({
       index: lineIndex,
       top: penY,
-      baseline: penY + xtf.header.ascender,
+      baseline: penY,
       characterCount: line.glyphs.length,
       text: line.glyphs.map((glyph) => glyph.character).join(''),
       baseWidth: line.baseWidth,
@@ -421,9 +512,17 @@ export function renderXtfDevicePreview(
       usedWidth,
       remainingWidth: Math.max(0, contentWidth - usedWidth),
       breakReason: truncatedAfterLine ? 'page-end' : line.breakReason,
+      lineAdvance,
+      indent: line.indent,
+      alignment: effectiveAlign,
     });
 
-    let penX = left;
+    let penX =
+      effectiveAlign === 'center'
+        ? left + (contentWidth - inkRunWidth) / 2
+        : effectiveAlign === 'right'
+          ? right - inkRunWidth
+          : left + line.indent;
     for (let glyphIndex = 0; glyphIndex < line.glyphs.length; glyphIndex += 1) {
       const planned = line.glyphs[glyphIndex];
       const resolved = planned.glyph;
@@ -518,7 +617,6 @@ export function renderXtfDevicePreview(
         planned.sourceIndex,
       );
     }
-    previousBreak = line.breakReason;
     if (truncatedAfterLine) break;
   }
 
@@ -566,13 +664,13 @@ export function renderXtfDevicePreview(
       fallbackSource: resolved.fallbackSource,
     };
   });
-  const hiddenCharacters = characters
+  const hiddenCharacters = sourceCharacters
     .slice(renderedSourceIndex + 1)
     .filter((character) => character !== '\n');
   const remainingCharacters = hiddenCharacters.length;
   const lastLine = lines.at(-1);
   const usedHeight = lastLine
-    ? lastLine.top + xtf.header.cellH - margin
+    ? lastLine.top + verticalCalibration.bottom - top
     : 0;
   let inkCollisionPixels = 0;
   for (const collision of collisionMask) {
@@ -588,10 +686,10 @@ export function renderXtfDevicePreview(
       bpp: xtf.header.bpp,
       cellW: xtf.header.cellW,
       cellH: xtf.header.cellH,
-      advanceY: linePitch,
+      advanceY: lineAdvance,
       contentBaseline: xtf.header.ascender,
       descenderHeight: Math.abs(xtf.header.descender),
-      cellOverlap: Math.max(0, xtf.header.cellH - linePitch),
+      cellOverlap: Math.max(0, xtf.header.cellH - lineAdvance),
     },
     device: {
       width,
@@ -601,7 +699,7 @@ export function renderXtfDevicePreview(
       inkCollisionRows: collisionRows.size,
       inkCollisionPixels,
       lineTops: lines.map((line) => line.top),
-      contentBounds: { left, top: margin, right, bottom },
+      contentBounds: { left, top, right, bottom },
       missingCodePoints: [...missingCodePoints].sort((a, b) => a - b),
       lines,
       glyphs,
@@ -613,8 +711,8 @@ export function renderXtfDevicePreview(
         cellW: xtf.header.cellW,
         cellH: xtf.header.cellH,
         storedAdvanceY: xtf.header.advanceY,
-        effectiveAdvanceY: linePitch,
-        advanceYFallback: xtf.header.advanceY === 0,
+        effectiveAdvanceY: lineAdvance,
+        advanceYFallback: false,
         fullWidth: xtf.header.fullWidth,
         asciiWidth: xtf.header.asciiWidth,
         ascender: xtf.header.ascender,
@@ -630,21 +728,164 @@ export function renderXtfDevicePreview(
         contentHeight,
         paragraphExtra,
         maximumWholeLines,
+        lineSpacing: layout.lineSpacing,
+        lineSpacingFactor,
+        lineAdvance,
+        paragraphRatio: layout.paragraphRatio,
+        paragraphAdvance,
+        indentChars: layout.indentChars,
+        indentPixels: xtf.header.cellW * layout.indentChars,
+        alignMode: layout.alignMode,
+        ignoredBlankBlocks: options.ignoredBlankBlocks ?? 0,
+        firstLineY,
+        pageFitBottomOffset: verticalCalibration.bottom,
+        readingSurfaceHeight: V6315_READING_SURFACE_HEIGHT,
       },
       collisionDataUrl,
       pageUsage: {
         displayedCharacters: glyphs.length,
-        totalCharacters,
+        totalCharacters: sourceCharacters.length,
         remainingCharacters,
         truncated: remainingCharacters > 0,
         lastVisibleCharacter:
-          renderedSourceIndex >= 0 ? characters[renderedSourceIndex] : '',
+          renderedSourceIndex >= 0 ? sourceCharacters[renderedSourceIndex] : '',
         firstHiddenCharacter: hiddenCharacters[0] ?? '',
         usedHeight,
         remainingHeight: Math.max(0, contentHeight - usedHeight),
       },
     },
   };
+}
+
+function normalizePreviewBlocks(
+  text: string,
+  supplied: DevicePreviewBlock[] | undefined,
+) {
+  if (supplied?.length) {
+    return supplied
+      .map((block) => ({ ...block, text: block.text.replace(/\r\n?/g, '\n').trim() }))
+      .filter((block) => block.text.length > 0);
+  }
+  const normalized = text.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
+  const blocks = normalized
+    .split(/\n[\t ]*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => ({ text: block }));
+  return blocks.length ? blocks : [{ text: normalized.trim() }];
+}
+
+function planFirmwareLines(
+  input: PlannedGlyph[],
+  paragraphIndex: number,
+  firstLineIndent: number,
+  contentWidth: number,
+  textAlign: DevicePreviewBlock['textAlign'],
+  output: PlannedLine[],
+) {
+  const tokens: PlannedGlyph[][] = [];
+  for (let index = 0; index < input.length; ) {
+    const glyph = input[index];
+    if (glyph.codePoint === 0x20) {
+      let end = index + 1;
+      while (end < input.length && input[end].codePoint === 0x20) end += 1;
+      tokens.push(input.slice(index, end));
+      index = end;
+      continue;
+    }
+    if (glyph.codePoint >= 0x21 && glyph.codePoint <= 0x7e) {
+      let end = index + 1;
+      while (
+        end < input.length &&
+        input[end].codePoint >= 0x21 &&
+        input[end].codePoint <= 0x7e
+      ) {
+        end += 1;
+      }
+      tokens.push(input.slice(index, end));
+      index = end;
+      continue;
+    }
+    tokens.push([glyph]);
+    index += 1;
+  }
+
+  let current: PlannedGlyph[] = [];
+  let currentWidth = 0;
+  let pendingSpaces: PlannedGlyph[] = [];
+  let firstLine = true;
+  const indentForLine = () => (firstLine ? firstLineIndent : 0);
+  const widthForLine = () => Math.max(1, contentWidth - indentForLine());
+  const finish = (breakReason: PlannedLine['breakReason']) => {
+    while (current.at(-1)?.codePoint === 0x20) {
+      const removed = current.pop();
+      currentWidth -= removed?.glyph.advance ?? 0;
+    }
+    output.push({
+      glyphs: current,
+      baseWidth: currentWidth,
+      breakReason,
+      paragraphIndex,
+      indent: indentForLine(),
+      textAlign,
+    });
+    current = [];
+    currentWidth = 0;
+    pendingSpaces = [];
+    firstLine = false;
+  };
+
+  for (const token of tokens) {
+    if (token.every((glyph) => glyph.codePoint === 0x20)) {
+      if (current.length) pendingSpaces.push(...token);
+      continue;
+    }
+    const pendingWidth = glyphRunWidth(pendingSpaces);
+    const tokenWidth = glyphRunWidth(token);
+    if (
+      current.length &&
+      currentWidth + pendingWidth + tokenWidth > widthForLine()
+    ) {
+      finish('automatic');
+    }
+    if (pendingSpaces.length && current.length) {
+      current.push(...pendingSpaces);
+      currentWidth += glyphRunWidth(pendingSpaces);
+      pendingSpaces = [];
+    }
+    for (const glyph of token) {
+      if (current.length && currentWidth + glyph.glyph.advance > widthForLine()) {
+        finish('automatic');
+      }
+      current.push(glyph);
+      currentWidth += glyph.glyph.advance;
+    }
+  }
+  if (current.length || !output.length || output.at(-1)?.paragraphIndex !== paragraphIndex) {
+    finish('text-end');
+  }
+}
+
+function glyphRunWidth(glyphs: PlannedGlyph[]) {
+  return glyphs.reduce((width, glyph) => width + glyph.glyph.advance, 0);
+}
+
+function countWholeLines(
+  top: number,
+  bottom: number,
+  pageFitBottomOffset: number,
+  lineAdvance: number,
+) {
+  let count = 0;
+  let y = Math.fround(top);
+  while (
+    Math.trunc(y) + pageFitBottomOffset <= bottom &&
+    count < 10_000
+  ) {
+    count += 1;
+    y = Math.fround(y + lineAdvance);
+  }
+  return count;
 }
 
 function parseXtf(input: Uint8Array | ArrayBuffer): ParsedXtf {
@@ -794,29 +1035,33 @@ function firmwareAdvance(
   codePoint: number,
   record: Uint8Array | null,
 ) {
-  // FUN_42042582 supplies the native 0x20..0x7e table. Its entries, notably
-  // U+0020, drive both measurement and wrapping.
-  if (codePoint >= 0x20 && codePoint <= 0x7e) {
-    return Math.max(1, asciiTableAdvance(xtf, codePoint) || xtf.header.asciiWidth);
+  // FUN_42080708 handles U+0020 separately: (cellW >> 2) + ctx+0x16.
+  if (codePoint === 0x20) {
+    return Math.max(1, (xtf.header.cellW >> 2) + V6315_CHARACTER_SPACING);
+  }
+  if (codePoint >= 0x21 && codePoint <= 0x7e) {
+    // FUN_4209810e rebuilds the active ASCII table from ink span + ctx+0x14
+    // (initialized to 1), then FUN_42080708 adds ctx+0x16 (also 1).
+    const ink = record ? glyphInkWidth(record, xtf) : 0;
+    const rebuilt = ink > 0 ? ink + 1 : asciiTableAdvance(xtf, codePoint);
+    return Math.max(
+      1,
+      (rebuilt || xtf.header.asciiWidth) + V6315_CHARACTER_SPACING,
+    );
   }
   if (firmwareZeroAdvanceCodePoint(codePoint)) return 0;
 
-  // FUN_42046fc2: ordinary multi-byte text, including Hangul, uses the
-  // header full-width value. Single-byte text uses asciiWidth. Only the
-  // ranges accepted by FUN_42046ce4 may replace that base with an XTF
-  // per-glyph advance.
-  const baseAdvance =
-    codePoint < 0x80 || firmwareUsesGlyphAdvance(codePoint)
-      ? xtf.header.asciiWidth
-      : xtf.header.fullWidth;
-  if (!record || !firmwareUsesGlyphAdvance(codePoint)) {
-    return Math.max(1, baseAdvance);
+  // FUN_4208115c and FUN_42080708 scan ordinary non-ASCII bitmaps and use
+  // (right + 1) - left, capped at cellW. Hangul is three-byte UTF-8, so the
+  // renderer also adds the initialized ctx+0x16 character spacing.
+  if (!firmwareUsesGlyphAdvance(codePoint)) {
+    const ink = record ? glyphInkWidth(record, xtf) : 0;
+    const measured = ink > 0 ? Math.min(ink, xtf.header.cellW) : xtf.header.cellW >> 1;
+    return Math.max(1, measured + V6315_CHARACTER_SPACING);
   }
 
-  // FUN_42045d74 caches max(storedAdvance, signedXOffset + inkWidth + 1).
-  // Unlike the legacy 4206xxxx path, this scans the actual 1/2-bpp bitmap
-  // after the two metadata bytes have been skipped.
-  return metadataEffectiveAdvance(xtf, record);
+  if (!record) return Math.max(1, xtf.header.asciiWidth + V6315_CHARACTER_SPACING);
+  return metadataEffectiveAdvance(xtf, record) + V6315_CHARACTER_SPACING;
 }
 
 function firmwareAdvanceSource(
@@ -824,11 +1069,12 @@ function firmwareAdvanceSource(
   record: Uint8Array | null,
 ): FirmwareAdvanceSource {
   if (codePoint === 0x09) return 'tab-width';
-  if (codePoint >= 0x20 && codePoint <= 0x7e) return 'ascii-table';
+  if (codePoint === 0x20) return 'cell-quarter-space';
+  if (codePoint >= 0x21 && codePoint <= 0x7e) return 'ascii-table';
   if (firmwareZeroAdvanceCodePoint(codePoint)) return 'zero-width';
   if (record && firmwareUsesGlyphAdvance(codePoint)) return 'glyph-metadata';
   if (codePoint < 0x80) return 'ascii-width';
-  return 'full-width';
+  return 'ink-bounds';
 }
 
 function firmwareUsesGlyphAdvance(codePoint: number) {
@@ -873,6 +1119,7 @@ function resolveFirmwareGlyph(
   const direct = recordForCodePoint(xtf, codePoint);
   if (direct) {
     const inkWidth = glyphInkWidth(direct, xtf);
+    const inkLeft = glyphInkLeft(direct, xtf);
     return {
       record: direct,
       renderedCodePoint: codePoint,
@@ -881,7 +1128,9 @@ function resolveFirmwareGlyph(
       fallbackSource: 'direct',
       storedAdvance: storedAdvance(xtf, direct),
       inkWidth: Math.max(0, inkWidth),
-      xOffset: signedXOffset(xtf, direct),
+      // FUN_4206ac92 shifts the staged bitmap by -left in the normal reader
+      // draw path, so the measured ink begins at the current pen position.
+      xOffset: inkLeft > 0 ? -inkLeft : 0,
       missing: false,
       generatedBox: false,
     };
@@ -920,7 +1169,7 @@ function resolveFirmwareGlyph(
       fallbackSource: replacement === 0xfffd ? 'replacement' : 'question',
       storedAdvance: storedAdvance(xtf, record),
       inkWidth: Math.max(0, inkWidth),
-      xOffset: signedXOffset(xtf, record),
+      xOffset: Math.min(0, -glyphInkLeft(record, xtf)),
       missing: true,
       generatedBox: false,
     };
@@ -971,24 +1220,107 @@ function firmwareJustification(line: PlannedLine, contentWidth: number) {
 }
 
 function glyphInkWidth(record: Uint8Array, xtf: ParsedXtf) {
-  const bitmapOffset = xtf.header.metadataBytes;
-  for (let x = xtf.header.cellW - 1; x >= 0; x -= 1) {
+  const left = glyphInkLeft(record, xtf);
+  if (left < 0) return -1;
+  for (let x = xtf.header.cellW - 1; x >= left; x -= 1) {
     for (let y = 0; y < xtf.header.cellH; y += 1) {
       if (
         readBitmapPixel(
           record,
-          bitmapOffset,
+          xtf.header.metadataBytes,
           xtf.header.rowStride,
           xtf.header.bpp,
           x,
           y,
         )
       ) {
-        return x + 1;
+        return x - left + 1;
       }
     }
   }
   return -1;
+}
+
+function glyphInkLeft(record: Uint8Array, xtf: ParsedXtf) {
+  for (let x = 0; x < xtf.header.cellW; x += 1) {
+    for (let y = 0; y < xtf.header.cellH; y += 1) {
+      if (
+        readBitmapPixel(
+          record,
+          xtf.header.metadataBytes,
+          xtf.header.rowStride,
+          xtf.header.bpp,
+          x,
+          y,
+        )
+      ) {
+        return x;
+      }
+    }
+  }
+  return -1;
+}
+
+function glyphInkVerticalBounds(record: Uint8Array, xtf: ParsedXtf) {
+  let top = xtf.header.cellH;
+  let bottom = -1;
+  for (let y = 0; y < xtf.header.cellH; y += 1) {
+    for (let x = 0; x < xtf.header.cellW; x += 1) {
+      if (
+        readBitmapPixel(
+          record,
+          xtf.header.metadataBytes,
+          xtf.header.rowStride,
+          xtf.header.bpp,
+          x,
+          y,
+        )
+      ) {
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+      }
+    }
+  }
+  return bottom < 0 ? null : { top, bottom };
+}
+
+function firmwareVerticalCalibration(xtf: ParsedXtf) {
+  // In FUN_4209810e's active external-font apply path, the firmware measures
+  // exactly three samples: "align", "n", and U+6211 (我). It sums each run's
+  // top and bottom ink rows, divides both sums by three, subtracts two from the
+  // averaged top, and stores bottom-top as ctx+0x10. FUN_420aff66 uses the
+  // averaged bottom (ctx+0x0a) for its 0x28e page-end test.
+  const samples = ['align', 'n', '\u6211'];
+  let topSum = 0;
+  let bottomSum = 0;
+  for (const sample of samples) {
+    let runTop = xtf.header.cellH;
+    let runBottom = -1;
+    for (const character of Array.from(sample)) {
+      const codePoint = character.codePointAt(0);
+      if (codePoint === undefined) continue;
+      const resolved = resolveFirmwareGlyph(xtf, codePoint);
+      if (resolved.generatedBox) {
+        runTop = 0;
+        runBottom = Math.max(runBottom, xtf.header.cellH - 1);
+        continue;
+      }
+      if (!resolved.record) continue;
+      const bounds = glyphInkVerticalBounds(resolved.record, xtf);
+      if (!bounds) continue;
+      runTop = Math.min(runTop, bounds.top);
+      runBottom = Math.max(runBottom, bounds.bottom);
+    }
+    topSum += runBottom < 0 ? 0 : runTop;
+    bottomSum += Math.max(0, runBottom);
+  }
+  const top = Math.trunc(topSum / samples.length) - 2;
+  const bottom = Math.trunc(bottomSum / samples.length);
+  return {
+    top,
+    bottom,
+    height: Math.max(0, bottom - top),
+  };
 }
 
 function glyphInkBounds(

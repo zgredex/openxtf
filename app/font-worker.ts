@@ -85,6 +85,9 @@ export type FontPreviewResult = {
       usedWidth: number;
       remainingWidth: number;
       breakReason: 'automatic' | 'manual' | 'text-end' | 'page-end';
+      lineAdvance?: number;
+      indent?: number;
+      alignment?: 'wrap-align' | 'right' | 'left' | 'center';
     }>;
     glyphs?: Array<{
       index: number;
@@ -101,6 +104,8 @@ export type FontPreviewResult = {
         | 'ascii-width'
         | 'full-width'
         | 'glyph-metadata'
+        | 'ink-bounds'
+        | 'cell-quarter-space'
         | 'zero-width'
         | 'tab-width';
       renderedCodePoint?: number;
@@ -136,6 +141,8 @@ export type FontPreviewResult = {
         | 'ascii-width'
         | 'full-width'
         | 'glyph-metadata'
+        | 'ink-bounds'
+        | 'cell-quarter-space'
         | 'zero-width'
         | 'tab-width';
       fallbackSource?:
@@ -169,6 +176,18 @@ export type FontPreviewResult = {
       contentHeight: number;
       paragraphExtra: number;
       maximumWholeLines: number;
+      lineSpacing?: 'auto' | 1.2 | 1.4 | 1.6 | 1.8 | 2;
+      lineSpacingFactor?: number;
+      lineAdvance?: number;
+      paragraphRatio?: 1 | 1.25 | 1.5 | 1.75 | 2;
+      paragraphAdvance?: number;
+      indentChars?: 1 | 2;
+      indentPixels?: number;
+      alignMode?: 'wrap-align' | 'right' | 'left';
+      ignoredBlankBlocks?: number;
+      firstLineY?: number;
+      pageFitBottomOffset?: number;
+      readingSurfaceHeight?: number;
     };
     collisionDataUrl?: string;
     pageUsage?: {

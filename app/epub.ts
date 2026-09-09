@@ -4,6 +4,15 @@ export type EpubSection = {
   id: string;
   label: string;
   text: string;
+  blocks: EpubBlock[];
+  ignoredBlankBlocks: number;
+};
+
+export type EpubBlock = {
+  text: string;
+  tag: string;
+  textAlign?: 'left' | 'right' | 'center' | 'justify';
+  suppressIndent?: boolean;
 };
 
 export type EpubBook = {
@@ -14,35 +23,7 @@ export type EpubBook = {
 
 const MAX_EPUB_BYTES = 100 * 1024 * 1024;
 const MAX_SECTION_CHARACTERS = 300_000;
-const EPUB_TEXT_FILE = /(?:^|\/)(?:container\.xml|[^/]+\.(?:opf|ncx|xhtml|html?|xml))$/i;
-const BLOCK_ELEMENTS = new Set([
-  'address',
-  'article',
-  'aside',
-  'blockquote',
-  'dd',
-  'div',
-  'dl',
-  'dt',
-  'figcaption',
-  'figure',
-  'footer',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'h5',
-  'h6',
-  'header',
-  'hr',
-  'li',
-  'main',
-  'p',
-  'pre',
-  'section',
-  'table',
-  'tr',
-]);
+const EPUB_TEXT_FILE = /(?:^|\/)(?:container\.xml|[^/]+\.(?:opf|ncx|xhtml|html?|xml|css))$/i;
 const OMIT_ELEMENTS = new Set([
   'audio',
   'canvas',
@@ -115,12 +96,19 @@ export async function readEpub(file: File): Promise<EpubBook> {
     const contentPath = resolveArchivePath(normalizedPackagePath, item.href);
     const contentFile = getArchiveFile(files, filesByLowerPath, contentPath);
     if (!contentFile) continue;
-    const content = extractReadableText(decodeText(contentFile));
+    const content = extractReadableContent(
+      decodeText(contentFile),
+      contentPath,
+      files,
+      filesByLowerPath,
+    );
     if (!content.text) continue;
     sections.push({
       id: `${sections.length}:${contentPath}`,
       label: content.heading || chapterLabel(contentPath, sections.length + 1),
       text: content.text.slice(0, MAX_SECTION_CHARACTERS),
+      blocks: trimBlocks(content.blocks, MAX_SECTION_CHARACTERS),
+      ignoredBlankBlocks: content.ignoredBlankBlocks,
     });
   }
 
@@ -169,11 +157,156 @@ function firstElementText(document: Document, localName: string) {
   return elementsByLocalName(document, localName)[0]?.textContent?.trim() || '';
 }
 
-function extractReadableText(source: string) {
+const READING_BLOCK_SELECTOR = [
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'figcaption',
+  'dd',
+  'dt',
+].join(',');
+
+type BookCssRule = {
+  selector: string;
+  declarations: Map<string, string>;
+  order: number;
+};
+
+function extractReadableContent(
+  source: string,
+  contentPath: string,
+  files: Map<string, Uint8Array>,
+  filesByLowerPath: Map<string, Uint8Array>,
+) {
   const document = new DOMParser().parseFromString(source, 'text/html');
   const body = document.body;
-  const pieces: string[] = [];
+  const rules: BookCssRule[] = [];
+  for (const link of Array.from(document.querySelectorAll('link[href]'))) {
+    if (!(link.getAttribute('rel') || '').toLowerCase().includes('stylesheet')) continue;
+    const href = link.getAttribute('href');
+    if (!href) continue;
+    const data = getArchiveFile(
+      files,
+      filesByLowerPath,
+      resolveArchivePath(contentPath, href),
+    );
+    if (data) rules.push(...parseBookCss(decodeText(data), rules.length));
+  }
+  for (const style of Array.from(document.querySelectorAll('style'))) {
+    rules.push(...parseBookCss(style.textContent || '', rules.length));
+  }
+  const candidates = Array.from(body.querySelectorAll(READING_BLOCK_SELECTOR));
+  if (!candidates.length && normalizeBlockText(readElementText(body))) {
+    candidates.push(body);
+  }
+  const blocks: EpubBlock[] = [];
+  let ignoredBlankBlocks = 0;
+  for (const element of candidates) {
+    const text = normalizeBlockText(readElementText(element));
+    if (!text) {
+      ignoredBlankBlocks += 1;
+      continue;
+    }
+    const bookStyle = bookBlockStyle(element, rules);
+    blocks.push({
+      text,
+      tag: element.localName.toLowerCase(),
+      ...bookStyle,
+    });
+  }
 
+  const heading =
+    body.querySelector('h1, h2, h3')?.textContent?.replace(/\s+/g, ' ').trim() ||
+    document.title.trim();
+  return {
+    heading,
+    text: blocks.map((block) => block.text).join('\n\n'),
+    blocks,
+    ignoredBlankBlocks,
+  };
+}
+
+function parseBookCss(source: string, orderOffset: number) {
+  const rules: BookCssRule[] = [];
+  const clean = source.replace(/\/\*[\s\S]*?\*\//g, '');
+  const pattern = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+  let order = orderOffset;
+  while ((match = pattern.exec(clean))) {
+    if (match[1].trim().startsWith('@')) continue;
+    const declarations = parseBookDeclarations(match[2]);
+    if (!declarations.size) continue;
+    for (const selector of match[1].split(',')) {
+      if (selector.trim()) {
+        rules.push({ selector: selector.trim(), declarations, order: order++ });
+      }
+    }
+  }
+  return rules;
+}
+
+function parseBookDeclarations(source: string) {
+  const declarations = new Map<string, string>();
+  for (const item of source.split(';')) {
+    const colon = item.indexOf(':');
+    if (colon < 0) continue;
+    const property = item.slice(0, colon).trim().toLowerCase();
+    if (property !== 'text-align' && property !== 'text-indent') continue;
+    declarations.set(
+      property,
+      item.slice(colon + 1).replace(/!important\s*$/i, '').trim().toLowerCase(),
+    );
+  }
+  return declarations;
+}
+
+function bookBlockStyle(element: Element, rules: BookCssRule[]) {
+  const values = new Map<string, { value: string; score: number; order: number }>();
+  for (const rule of rules) {
+    try {
+      if (!element.matches(rule.selector)) continue;
+    } catch {
+      continue;
+    }
+    const score = bookSelectorScore(rule.selector);
+    for (const [property, value] of rule.declarations) {
+      const previous = values.get(property);
+      if (!previous || score > previous.score || (score === previous.score && rule.order >= previous.order)) {
+        values.set(property, { value, score, order: rule.order });
+      }
+    }
+  }
+  for (const [property, value] of parseBookDeclarations(element.getAttribute('style') || '')) {
+    values.set(property, { value, score: Number.MAX_SAFE_INTEGER, order: Number.MAX_SAFE_INTEGER });
+  }
+  const align = values.get('text-align')?.value;
+  const textAlign =
+    align === 'left' || align === 'right' || align === 'center' || align === 'justify'
+      ? align
+      : undefined;
+  const indent = values.get('text-indent')?.value;
+  return {
+    ...(textAlign ? { textAlign } : {}),
+    ...(indent && /^0(?:[a-z%]+)?$/i.test(indent) ? { suppressIndent: true } : {}),
+  } as Pick<EpubBlock, 'textAlign' | 'suppressIndent'>;
+}
+
+function bookSelectorScore(selector: string) {
+  const ids = selector.match(/#[\w-]+/g)?.length ?? 0;
+  const classes = selector.match(/\.[\w-]+|\[[^\]]+\]|:[\w-]+/g)?.length ?? 0;
+  const elements = selector.match(/(?:^|[\s>+~])[a-z][\w-]*/gi)?.length ?? 0;
+  return ids * 10_000 + classes * 100 + elements;
+}
+
+function readElementText(element: Element) {
+  const pieces: string[] = [];
   const visit = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
       pieces.push(node.nodeValue || '');
@@ -186,24 +319,30 @@ function extractReadableText(source: string) {
       pieces.push('\n');
       return;
     }
-    const block = BLOCK_ELEMENTS.has(tag);
-    if (block) pieces.push('\n');
     for (const child of node.childNodes) visit(child);
     if (tag === 'td' || tag === 'th') pieces.push('\t');
-    if (block) pieces.push('\n');
   };
+  visit(element);
+  return pieces.join('');
+}
 
-  visit(body);
-  const text = pieces
-    .join('')
+function normalizeBlockText(text: string) {
+  return text
     .replace(/[\t\f\v\u00a0 ]+/g, ' ')
     .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
     .trim();
-  const heading =
-    body.querySelector('h1, h2, h3')?.textContent?.replace(/\s+/g, ' ').trim() ||
-    document.title.trim();
-  return { heading, text };
+}
+
+function trimBlocks(blocks: EpubBlock[], limit: number) {
+  const result: EpubBlock[] = [];
+  let remaining = limit;
+  for (const block of blocks) {
+    if (remaining <= 0) break;
+    const text = block.text.slice(0, remaining);
+    if (text) result.push({ ...block, text });
+    remaining -= text.length + 2;
+  }
+  return result;
 }
 
 function isManifestItem(

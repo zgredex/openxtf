@@ -761,6 +761,69 @@ a {
   color: #f8fafc;
 }
 
+.device-reader-layout {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--paper-deep);
+  padding: 14px;
+}
+
+.device-reader-layout-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.device-reader-layout-heading .field-label,
+.device-reader-layout-heading .hint {
+  margin: 0;
+}
+
+.device-layout-result {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 5px 8px;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.device-reader-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.device-reader-layout-grid > label {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .device-reader-layout-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .device-reader-layout-heading {
+    display: grid;
+  }
+
+  .device-layout-result {
+    justify-self: start;
+  }
+
+  .device-reader-layout-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .workspace-title {
   margin: 4px 0 0;
   color: #0f172a;
