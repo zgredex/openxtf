@@ -82,10 +82,7 @@ const DIAGNOSTIC_ADVANCE_SOURCES = [
   'ascii-width',
   'full-width',
   'glyph-metadata',
-  'ink-bounds',
-  'cell-quarter-space',
   'zero-width',
-  'tab-width',
 ] as const;
 
 type Notice =
@@ -101,6 +98,14 @@ export default function OpenXtfClient() {
   const fileIds = useRef(new WeakMap<File, number>());
   const nextFileId = useRef(0);
   const previewSequence = useRef(0);
+  const previewXtfCacheRef = useRef<{
+    key: string;
+    result: FontBuildResult;
+  } | null>(null);
+  const previewPrepareCacheRef = useRef<{
+    key: string;
+    missingCps: number[];
+  } | null>(null);
 
   const [font, setFont] = useState<File | null>(null);
   const [fallbacks, setFallbacks] = useState<File[]>([]);
@@ -166,13 +171,17 @@ export default function OpenXtfClient() {
   const previewBlocks = useMemo(
     () =>
       selectedEpubSection && !epubTextEdited
-        ? selectedEpubSection.blocks.map((block, index) => ({
+        ? selectedEpubSection.blocks.map((block) => ({
             text: block.text,
+            inlineRuns: block.inlineRuns,
             tag: block.tag,
+            className: block.className,
+            breakAfter: block.breakAfter,
+            startsParagraph: block.startsParagraph,
             textAlign: block.textAlign,
-            suppressIndent:
-              block.suppressIndent ||
-              (index === 0 && block.textAlign === 'center'),
+            suppressIndent: block.suppressIndent,
+            syntheticBold: block.syntheticBold,
+            recordPrefix: block.recordPrefix,
           }))
         : undefined,
     [selectedEpubSection, epubTextEdited],
@@ -192,7 +201,9 @@ export default function OpenXtfClient() {
     deviceLayoutSettings.lineSpacing === 'auto'
       ? 1
       : deviceLayoutSettings.lineSpacing;
-  const deviceLineAdvance = koreanSettings.cellH * deviceLineFactor;
+  const deviceBaseAdvanceY =
+    koreanSettings.advanceY || koreanSettings.cellH;
+  const deviceLineAdvance = deviceBaseAdvanceY * deviceLineFactor;
   const missingSample = missingCps
     .slice(0, 40)
     .map((cp) => String.fromCodePoint(cp))
@@ -211,6 +222,51 @@ export default function OpenXtfClient() {
       })
       .join('|');
   }, [font, fallbacks]);
+
+  // Device-layout choices and preview content do not alter the XTF bytes.
+  // Keep the exact profiled build so those changes can be rendered again
+  // without rerasterizing the complete selected font scope. Every converter
+  // input that can affect the finished file remains part of this key.
+  const previewXtfBuildKey = useMemo(
+    () =>
+      JSON.stringify([
+        fontKey,
+        format,
+        fontSize,
+        actualBpp,
+        gamma,
+        actualThresholds,
+        koreanProfileActive
+          ? Number(embolden.toFixed(2))
+          : Number((embolden + 0.1).toFixed(2)),
+        letterSpacing,
+        binThreshold,
+        actualScope,
+        systemFallback,
+        allCharacters,
+        koreanProfileActive ? koreanSettings : null,
+      ]),
+    [
+      fontKey,
+      format,
+      fontSize,
+      actualBpp,
+      gamma,
+      actualThresholds,
+      embolden,
+      letterSpacing,
+      binThreshold,
+      actualScope,
+      systemFallback,
+      allCharacters,
+      koreanProfileActive,
+      koreanSettings,
+    ],
+  );
+  const previewPrepareKey = useMemo(
+    () => JSON.stringify([fontKey, format, fontSize, allCharacters]),
+    [fontKey, format, fontSize, allCharacters],
+  );
 
   useEffect(() => {
     const storedDark = localStorage.getItem('xt_dark') === '1';
@@ -288,37 +344,63 @@ export default function OpenXtfClient() {
     let localPreviewWorker: FontWorkerClient | null = null;
     const timer = window.setTimeout(async () => {
       try {
-        const prepared = await worker.prepare({
-          outputFormat: format,
-          fontKey,
-          fontFile: font,
-          fallbackFiles: fallbacks,
-          missingText: allCharacters,
-          fontSize,
-        });
+        let prepared =
+          previewPrepareCacheRef.current?.key === previewPrepareKey
+            ? previewPrepareCacheRef.current
+            : null;
+        if (!prepared) {
+          const result = await worker.prepare({
+            outputFormat: format,
+            fontKey,
+            fontFile: font,
+            fallbackFiles: fallbacks,
+            missingText: allCharacters,
+            fontSize,
+          });
+          prepared = {
+            key: previewPrepareKey,
+            missingCps: result.missingCps || [],
+          };
+          previewPrepareCacheRef.current = prepared;
+        }
         if (sequence !== previewSequence.current) return;
-        setMissingCps(prepared.missingCps || []);
+        setMissingCps(prepared.missingCps);
         let rendered: FontPreviewResult;
         if (koreanProfileActive) {
-          localPreviewWorker = new FontWorkerClient();
-          await localPreviewWorker.probe();
-          const previewFont = await localPreviewWorker.build({
-            options: {
-              ...makeOptions(),
-              fontFile: font,
-              fallbackFiles: [...fallbacks],
-              charsText: previewText || PREVIEW_TEXT,
-              glyphScope: 'device',
-              systemFallback,
-              fileNamePattern: 'preview.xtf',
-              includePreview: false,
-            },
-          });
-          if (sequence !== previewSequence.current) return;
-          const profiledPreview = applyKoreanX4Profile(
-            previewFont,
-            koreanSettings,
-          );
+          let profiledPreview =
+            previewXtfCacheRef.current?.key === previewXtfBuildKey
+              ? previewXtfCacheRef.current.result
+              : null;
+          if (!profiledPreview) {
+            localPreviewWorker = new FontWorkerClient();
+            await localPreviewWorker.probe();
+            const previewFont = await localPreviewWorker.build({
+              options: {
+                ...makeOptions(),
+                fontFile: font,
+                fallbackFiles: [...fallbacks],
+                // The worker derives its raster cell, baselines, and advances
+                // from the complete selected glyph population. A page-only
+                // subset can therefore produce different glyph records from
+                // the exported XTF. Build the exact output scope here and feed
+                // those finished bytes to the firmware preview.
+                charsText: allCharacters,
+                glyphScope: actualScope,
+                systemFallback,
+                fileNamePattern: 'preview.xtf',
+                includePreview: false,
+              },
+            });
+            if (sequence !== previewSequence.current) return;
+            profiledPreview = applyKoreanX4Profile(
+              previewFont,
+              koreanSettings,
+            );
+            previewXtfCacheRef.current = {
+              key: previewXtfBuildKey,
+              result: profiledPreview,
+            };
+          }
           rendered = renderXtfDevicePreview(
             profiledPreview.bytes,
             previewText,
@@ -326,7 +408,8 @@ export default function OpenXtfClient() {
             {
               layout: deviceLayoutSettings,
               blocks: previewBlocks,
-              retainedBlankBlocks: selectedEpubSection?.retainedBlankBlocks,
+              skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+              documentLanguage: epubBook?.language,
             },
           );
         } else {
@@ -390,6 +473,8 @@ export default function OpenXtfClient() {
     deviceLayoutSettings,
     previewBlocks,
     selectedEpubSection,
+    previewXtfBuildKey,
+    previewPrepareKey,
   ]);
 
   function makeOptions() {
@@ -612,6 +697,10 @@ export default function OpenXtfClient() {
       );
       if (koreanProfileActive) {
         result = applyKoreanX4Profile(result, koreanSettings);
+        previewXtfCacheRef.current = {
+          key: previewXtfBuildKey,
+          result,
+        };
         setPreview(
           renderXtfDevicePreview(
             result.bytes,
@@ -620,7 +709,8 @@ export default function OpenXtfClient() {
             {
               layout: deviceLayoutSettings,
               blocks: previewBlocks,
-              retainedBlankBlocks: selectedEpubSection?.retainedBlankBlocks,
+              skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+              documentLanguage: epubBook?.language,
             },
           ),
         );
@@ -681,8 +771,9 @@ export default function OpenXtfClient() {
   const diagnosticGlyphs = diagnosticDevice?.glyphs ?? [];
   const diagnosticSpaces = diagnosticDevice?.spaces ?? [];
   const diagnosticWordSpace =
-    diagnosticSpaces.find((space) => space.codePoint === 0x20)?.advance ??
-    ((koreanSettings.cellW >> 2) + 1);
+    diagnosticSpaces.find((space) => space.codePoint === 0x20)
+      ?.compositionAdvance ??
+    koreanSettings.spaceWidth;
   const diagnosticHeader = diagnosticDevice?.xtfHeader;
   const diagnosticLayout = diagnosticDevice?.layout;
   const diagnosticPage = diagnosticDevice?.pageUsage;
@@ -719,13 +810,14 @@ export default function OpenXtfClient() {
     (glyph) => glyph.generatedBox,
   ).length;
   const diagnosticJustifiedLines = diagnosticLines.filter(
-    (line) => (line.justificationPixels ?? 0) > 0,
+    (line) => (line.justificationPixels ?? 0) !== 0,
   ).length;
   const diagnosticAutomaticBreaks = diagnosticLines.filter(
     (line) => line.breakReason === 'automatic',
   ).length;
   const diagnosticManualBreaks = diagnosticLines.filter(
-    (line) => line.breakReason === 'manual',
+    (line) =>
+      line.breakReason === 'soft' || line.breakReason === 'paragraph',
   ).length;
   const strokeControls =
     format === 'xtf' ? (
@@ -1102,6 +1194,62 @@ export default function OpenXtfClient() {
                     </label>
                   </section>
 
+                  <section className="appearance-group">
+                    <p className="appearance-group-title">
+                      {copy.textSpacingAndRhythm}
+                    </p>
+                    <div className="settings-grid">
+                      <NumberField
+                        label={copy.fullWidthAdvance}
+                        value={koreanSettings.fullWidth}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.fullWidthAdvanceHelp}
+                        onChange={(value) =>
+                          updateKoreanSetting('fullWidth', value)
+                        }
+                      />
+                      <NumberField
+                        label={copy.storedAdvanceY}
+                        value={koreanSettings.advanceY}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.advanceYHelp}
+                        onChange={(value) =>
+                          updateKoreanSetting('advanceY', value)
+                        }
+                      />
+                      <NumberField
+                        label={copy.asciiMeanWidth}
+                        value={koreanSettings.asciiWidth}
+                        min={1}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.asciiMeanWidthHelp}
+                        onChange={(value) =>
+                          updateKoreanSetting('asciiWidth', value)
+                        }
+                      />
+                      <NumberField
+                        label={copy.effectiveWordSpace}
+                        value={koreanSettings.spaceWidth}
+                        min={0}
+                        max={255}
+                        step={1}
+                        suffix="px"
+                        help={copy.wordSpaceHelp}
+                        onChange={(value) =>
+                          updateKoreanSetting('spaceWidth', value)
+                        }
+                      />
+                    </div>
+                  </section>
+
                   <section className="appearance-group space-y-4">
                     <p className="appearance-group-title">
                       {copy.strokeAppearance}
@@ -1450,7 +1598,7 @@ export default function OpenXtfClient() {
                       {deviceLayoutSettings.lineSpacing === 'auto'
                         ? copy.lineAutoDynamic
                         : copy.exactLineAdvance(
-                            koreanSettings.cellH,
+                            deviceBaseAdvanceY,
                             deviceLineFactor,
                             deviceLineAdvance,
                           )}
@@ -1640,8 +1788,10 @@ export default function OpenXtfClient() {
                             >
                               {line.breakReason === 'automatic'
                                 ? '↳'
-                                : line.breakReason === 'manual'
+                                : line.breakReason === 'soft'
                                   ? '↵'
+                                  : line.breakReason === 'paragraph'
+                                    ? '¶'
                                   : line.breakReason === 'page-end'
                                     ? '■'
                                     : '•'}
@@ -1708,8 +1858,16 @@ export default function OpenXtfClient() {
                             ? `756 ÷ ${formatFirmwareNumber(diagnosticLayout.weightedIntervals, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
                             : diagnosticLayout?.lineAdvance !== undefined &&
                                 diagnosticLayout.lineSpacingFactor !== undefined
-                              ? `${preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
+                              ? `${diagnosticHeader?.effectiveAdvanceY ?? preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
                             : `${preview.metrics.advanceY} px`}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.storedAdvanceY}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${diagnosticHeader.storedAdvanceY} → ${diagnosticHeader.effectiveAdvanceY} px${diagnosticHeader.advanceYFallback ? ` · ${copy.diagnosticCellHeightFallback}` : ''}`
+                            : '—'}
                         </dd>
                       </div>
                       <div>
@@ -1740,10 +1898,18 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
+                        <dt>{copy.diagnosticXtfCrc}</dt>
+                        <dd>
+                          {diagnosticHeader
+                            ? `${formatHex32(diagnosticHeader.crcData)} / ${formatHex32(diagnosticHeader.crcHeader)}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
                         <dt>{copy.diagnosticContentArea}</dt>
                         <dd>
                           {diagnosticLayout
-                            ? `${diagnosticLayout.contentWidth}×${diagnosticLayout.contentHeight} · ${diagnosticLayout.margin}px`
+                            ? `${diagnosticLayout.contentWidth}×${diagnosticLayout.contentHeight} · ${diagnosticLayout.margin}px · ${copy.diagnosticParagraphMode} ${diagnosticLayout.paragraphMode ?? '—'} · ${copy.diagnosticHorizontalOffset} ${formatSignedPixels(diagnosticLayout.horizontalOffset ?? 0)}`
                             : '—'}
                         </dd>
                       </div>
@@ -1751,6 +1917,7 @@ export default function OpenXtfClient() {
                         <dt>{copy.diagnosticParagraphAdvance}</dt>
                         <dd>
                           {diagnosticLayout?.paragraphAdvance !== undefined &&
+                          diagnosticLayout.lineAdvance !== undefined &&
                           diagnosticLayout.paragraphRatio !== undefined
                             ? `${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} × ${formatFirmwareNumber(diagnosticLayout.paragraphRatio, language)} = ${formatFirmwareNumber(diagnosticLayout.paragraphAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.paragraphAdvance)}`
                             : '—'}
@@ -1759,9 +1926,11 @@ export default function OpenXtfClient() {
                       <div>
                         <dt>{copy.diagnosticIndent}</dt>
                         <dd>
-                          {diagnosticLayout?.indentPixels !== undefined &&
-                          diagnosticLayout.indentChars !== undefined
-                            ? `${diagnosticLayout.indentChars} × ${preview.metrics.cellW} = ${diagnosticLayout.indentPixels} px`
+                          {diagnosticLayout?.cjkIndentPixels !== undefined &&
+                          diagnosticLayout.nonCjkIndentPixels !== undefined &&
+                          diagnosticLayout.indentChars !== undefined &&
+                          diagnosticHeader
+                            ? `${copy.diagnosticCjkIndent}: ${diagnosticLayout.indentChars} × ${diagnosticHeader.fullWidth} = ${diagnosticLayout.cjkIndentPixels} px · ${copy.diagnosticNonCjkIndent}: 2 × ${diagnosticLayout.nonCjkIndentPixels / 2} = ${diagnosticLayout.nonCjkIndentPixels} px`
                             : '—'}
                         </dd>
                       </div>
@@ -1778,10 +1947,25 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
+                        <dt>{copy.diagnosticLanguage}</dt>
+                        <dd>
+                          {diagnosticLayout
+                            ? `${diagnosticLayout.documentLanguage ?? 'und'} → ${diagnosticLayout.firmwareLanguage ?? 'und'}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticHyphenation}</dt>
+                        <dd>
+                          {diagnosticLayout
+                            ? `${copy.diagnosticDictionary} ${diagnosticLayout.hyphenationDictionary ? copy.yes : copy.no} · ${copy.diagnosticActive} ${diagnosticLayout.hyphenationEnabled ? copy.yes : copy.no}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
                         <dt>{copy.diagnosticSpace}</dt>
                         <dd>
-                          ({preview.metrics.cellW} &gt;&gt; 2) + 1 ={' '}
-                          {diagnosticWordSpace} px
+                          XTF ASCII[U+0020] = {diagnosticWordSpace} px
                         </dd>
                       </div>
                       <div>
@@ -1839,7 +2023,7 @@ export default function OpenXtfClient() {
                       <div>
                         <dt>{copy.diagnosticRetainedBlankBlocks}</dt>
                         <dd>
-                          {diagnosticLayout?.retainedBlankBlocks ?? 0} /{' '}
+                          {diagnosticLayout?.skippedEmptyBlocks ?? 0} /{' '}
                           {diagnosticLayout?.blankLineRecords ?? 0}
                         </dd>
                       </div>
@@ -1955,9 +2139,11 @@ export default function OpenXtfClient() {
                           <tr>
                             <th>{copy.diagnosticCharacter}</th>
                             <th>{copy.diagnosticCodePoint}</th>
+                            <th>{copy.diagnosticRecordCodePoint}</th>
                             <th>{copy.diagnosticAdvanceSource}</th>
                             <th>{copy.diagnosticRecordPresent}</th>
-                            <th>{copy.diagnosticEffectiveAdvance}</th>
+                            <th>{copy.diagnosticCompositionAdvance}</th>
+                            <th>{copy.diagnosticPaintAdvance}</th>
                             <th>{copy.diagnosticFallback}</th>
                           </tr>
                         </thead>
@@ -1967,12 +2153,23 @@ export default function OpenXtfClient() {
                               <td>{diagnosticCharacterName(space.codePoint, copy)}</td>
                               <td>{formatCodePoint(space.codePoint)}</td>
                               <td>
+                                {space.recordCodePoint === null ||
+                                space.recordCodePoint === undefined
+                                  ? '—'
+                                  : formatCodePoint(space.recordCodePoint)}
+                              </td>
+                              <td>
                                 {space.advanceSource
                                   ? copy.diagnosticAdvanceSources[space.advanceSource]
                                   : '—'}
                               </td>
                               <td>{space.stored ? copy.yes : copy.no}</td>
-                              <td>{space.advance} px</td>
+                              <td>
+                                {space.codePoint === 0x09
+                                  ? `${space.emptyLineAdvance ?? '—'} / ${space.nonEmptyLineAdvance ?? '—'} px`
+                                  : `${space.compositionAdvance} px`}
+                              </td>
+                              <td>{space.paintAdvance} px</td>
                               <td>
                                 {space.fallbackSource
                                   ? copy.diagnosticFallbackSources[space.fallbackSource]
@@ -1994,12 +2191,17 @@ export default function OpenXtfClient() {
                             <th>#</th>
                             <th>{copy.diagnosticText}</th>
                             <th>{copy.diagnosticBreak}</th>
+                            <th>{copy.diagnosticRecordBytes}</th>
+                            <th>{copy.diagnosticSourceMarkup}</th>
                             <th>{copy.diagnosticTopBaseline}</th>
                             <th>{copy.diagnosticLineAdvance}</th>
                             <th>{copy.diagnosticIndent}</th>
-                            <th>{copy.diagnosticAlignment}</th>
+                            <th>{copy.diagnosticRequestedEffectiveAlignment}</th>
+                            <th>{copy.diagnosticPlacementBranch}</th>
                             <th>{copy.diagnosticCharacters}</th>
+                            <th>{copy.diagnosticLayoutWidth}</th>
                             <th>{copy.diagnosticBaseWidth}</th>
+                            <th>{copy.diagnosticPreJustifyWidth}</th>
                             <th>{copy.diagnosticJustification}</th>
                             <th>{copy.diagnosticUsedRemaining}</th>
                           </tr>
@@ -2010,6 +2212,11 @@ export default function OpenXtfClient() {
                               <td>{line.index + 1}</td>
                               <td className="diagnostic-text-cell">{line.text || '—'}</td>
                               <td>{copy.diagnosticBreakReasons[line.breakReason]}</td>
+                              <td className="mono">{formatRecordBytes(line, copy)}</td>
+                              <td>
+                                {line.sourceTag ? `<${line.sourceTag}>` : '—'}
+                                {line.sourceClass ? ` · .${line.sourceClass}` : ''}
+                              </td>
                               <td>{line.top} px</td>
                               <td>
                                 {line.lineAdvance !== undefined
@@ -2019,22 +2226,28 @@ export default function OpenXtfClient() {
                               </td>
                               <td>{line.indent ?? 0} px</td>
                               <td>
-                                {line.alignment === 'center'
-                                  ? copy.centerAlign
-                                  : line.alignment === 'wrap-align'
-                                    ? copy.wrapAlign
-                                    : line.alignment === 'right'
-                                      ? copy.rightAlign
-                                      : copy.leftAlign}
+                                {formatDiagnosticAlignment(
+                                  line.requestedAlignment,
+                                  copy,
+                                )}{' '}
+                                → {formatDiagnosticAlignment(line.alignment, copy)}
+                                {line.syntheticBold
+                                  ? ` · ${copy.diagnosticSyntheticBold}`
+                                  : ''}
+                              </td>
+                              <td>
+                                {formatDiagnosticPlacement(line, copy)}
                               </td>
                               <td>{line.characterCount}</td>
+                              <td>{line.layoutWidth ?? '—'} px</td>
                               <td>{line.baseWidth ?? line.usedWidth} px</td>
+                              <td>{line.preJustifyWidth ?? line.baseWidth ?? '—'} px</td>
                               <td>
-                                +{line.justificationPixels ?? 0} px ·{' '}
-                                {line.justifiedSpaces ?? 0} SP
+                                {formatSignedPixels(line.justificationPixels ?? 0)} ·{' '}
+                                {line.justifiedGaps ?? 0} {copy.diagnosticGaps}
                               </td>
                               <td>
-                                {line.usedWidth} / {line.remainingWidth} px
+                                {line.usedWidth} / {formatSignedPixels(line.remainingWidth)}
                               </td>
                             </tr>
                           ))}
@@ -2096,6 +2309,7 @@ export default function OpenXtfClient() {
                               </td>
                               <td>
                                 {glyph.storedAdvance ?? '—'} /{' '}
+                                {glyph.layoutAdvance ?? '—'} /{' '}
                                 {glyph.baseAdvance ?? glyph.advance} px
                               </td>
                               <td>+{glyph.justificationExtra ?? 0} px</td>
@@ -2435,6 +2649,85 @@ function formatCodePoint(codePoint: number) {
   return `U+${codePoint.toString(16).toUpperCase().padStart(codePoint > 0xffff ? 6 : 4, '0')}`;
 }
 
+function formatDiagnosticAlignment(
+  alignment:
+    | 'wrap-align'
+    | 'right'
+    | 'left'
+    | 'center'
+    | undefined,
+  copy: TranslationCopy,
+) {
+  if (alignment === 'center') return copy.centerAlign;
+  if (alignment === 'wrap-align') return copy.wrapAlign;
+  if (alignment === 'right') return copy.rightAlign;
+  if (alignment === 'left') return copy.leftAlign;
+  return '—';
+}
+
+function formatDiagnosticPlacement(
+  line: NonNullable<
+    NonNullable<FontPreviewResult['device']>['lines']
+  >[number],
+  copy: TranslationCopy,
+) {
+  if (!line.placementBranch) return '—';
+  const parts: string[] = [
+    copy.diagnosticPlacementBranches[line.placementBranch],
+  ];
+  if (line.placementBypassReason) {
+    parts.push(copy.diagnosticPlacementReasons[line.placementBypassReason]);
+  }
+  if (line.terminalAdjustmentPixels) {
+    parts.push(
+      `${copy.diagnosticTerminalAdjustment} −${line.terminalAdjustmentPixels} px`,
+    );
+  }
+  if (line.trailingAsciiReservePixels) {
+    parts.push(
+      `${copy.diagnosticTrailingAsciiReserve} ${line.trailingAsciiReservePixels} px`,
+    );
+  }
+  return parts.join(' · ');
+}
+
+function formatRecordBytes(
+  line: NonNullable<
+    NonNullable<FontPreviewResult['device']>['lines']
+  >[number],
+  copy: TranslationCopy,
+) {
+  const parts: string[] = [];
+  if (line.recordPrefixByte !== null && line.recordPrefixByte !== undefined) {
+    parts.push(
+      `${copy.diagnosticRecordPrefix} ${line.recordPrefixByte.toString(16).toUpperCase().padStart(2, '0')}`,
+    );
+  }
+  if (line.inlineControlBytes?.length) {
+    parts.push(
+      `${copy.diagnosticInlineControls} ${line.inlineControlBytes
+        .map(
+          (control) =>
+            `${copy.diagnosticInlineControlKinds[control.kind]}@${control.recordOffset}=0x${control.byte
+              .toString(16)
+              .toUpperCase()
+              .padStart(2, '0')}`,
+        )
+        .join(' ')}`,
+    );
+  }
+  if (line.recordSuffixBytes?.length) {
+    parts.push(
+      `${copy.diagnosticRecordSuffix} ${line.recordSuffixBytes
+        .map((byte) => byte.toString(16).toUpperCase().padStart(2, '0'))
+        .join(' ')}`,
+    );
+  }
+  if (line.endOfSourceFlag) parts.push(copy.diagnosticEndOfSourceFlag);
+  if (line.pageStop) parts.push(copy.diagnosticPageStopFlag);
+  return parts.join(' · ') || copy.diagnosticNoRecordFlags;
+}
+
 function diagnosticCharacterName(
   codePoint: number,
   copy: TranslationCopy,
@@ -2582,6 +2875,14 @@ function formatFirmwareNumber(value: number, language: Language) {
     maximumFractionDigits: 4,
     useGrouping: false,
   });
+}
+
+function formatSignedPixels(value: number) {
+  return `${value > 0 ? '+' : ''}${value} px`;
+}
+
+function formatHex32(value: number) {
+  return `0x${(value >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 function float32Hex(value: number) {

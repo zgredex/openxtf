@@ -79,15 +79,46 @@ export type FontPreviewResult = {
       baseline: number;
       characterCount: number;
       text?: string;
+      layoutWidth?: number;
       baseWidth?: number;
+      preJustifyWidth?: number;
       justificationPixels?: number;
-      justifiedSpaces?: number;
+      justifiedGaps?: number;
+      placementBranch?: 'direct' | 'space-distribution' | 'cjk-distribution';
+      placementBypassReason?:
+        | 'alignment'
+        | 'record-ending'
+        | 'nonpositive-space-slack'
+        | 'no-boundary'
+        | 'single-trailing-ascii'
+        | 'excessive-cjk-slack'
+        | 'no-adjustment';
+      terminalAdjustmentPixels?: number;
+      trailingAsciiReservePixels?: number;
       usedWidth: number;
       remainingWidth: number;
-      breakReason: 'automatic' | 'manual' | 'text-end' | 'page-end';
+      breakReason:
+        | 'automatic'
+        | 'soft'
+        | 'paragraph'
+        | 'text-end'
+        | 'page-end';
       lineAdvance?: number;
       indent?: number;
       alignment?: 'wrap-align' | 'right' | 'left' | 'center';
+      requestedAlignment?: 'wrap-align' | 'right' | 'left' | 'center';
+      recordPrefixByte?: number | null;
+      inlineControlBytes?: Array<{
+        recordOffset: number;
+        byte: 0x02 | 0x03 | 0x1c | 0x1d;
+        kind: 'bold-start' | 'bold-end' | 'italic-start' | 'italic-end';
+      }>;
+      recordSuffixBytes?: number[];
+      endOfSourceFlag?: boolean;
+      pageStop?: boolean;
+      syntheticBold?: boolean;
+      sourceTag?: string;
+      sourceClass?: string;
     }>;
     glyphs?: Array<{
       index: number;
@@ -97,6 +128,7 @@ export type FontPreviewResult = {
       x: number;
       y: number;
       advance: number;
+      layoutAdvance?: number;
       baseAdvance?: number;
       justificationExtra?: number;
       advanceSource?:
@@ -104,10 +136,7 @@ export type FontPreviewResult = {
         | 'ascii-width'
         | 'full-width'
         | 'glyph-metadata'
-        | 'ink-bounds'
-        | 'cell-quarter-space'
-        | 'zero-width'
-        | 'tab-width';
+        | 'zero-width';
       renderedCodePoint?: number;
       fallbackSource?:
         | 'direct'
@@ -134,17 +163,18 @@ export type FontPreviewResult = {
     }>;
     spaces?: Array<{
       codePoint: number;
-      advance: number;
+      recordCodePoint?: number | null;
+      compositionAdvance: number;
+      paintAdvance: number;
+      emptyLineAdvance?: number;
+      nonEmptyLineAdvance?: number;
       stored: boolean;
       advanceSource?:
         | 'ascii-table'
         | 'ascii-width'
         | 'full-width'
         | 'glyph-metadata'
-        | 'ink-bounds'
-        | 'cell-quarter-space'
-        | 'zero-width'
-        | 'tab-width';
+        | 'zero-width';
       fallbackSource?:
         | 'direct'
         | 'replacement'
@@ -169,9 +199,13 @@ export type FontPreviewResult = {
       bytesPerGlyph: number;
       glyphCount: number;
       rangeCount: number;
+      crcData: number;
+      crcHeader: number;
     };
     layout?: {
       margin: number;
+      horizontalOffset?: number;
+      paragraphMode?: 0 | 1 | 2 | 3 | 4;
       contentWidth: number;
       contentHeight: number;
       paragraphExtra: number;
@@ -188,9 +222,14 @@ export type FontPreviewResult = {
       paragraphBoundaryCount?: number;
       blankLineRecords?: number;
       indentChars?: 1 | 2;
-      indentPixels?: number;
+      cjkIndentPixels?: number;
+      nonCjkIndentPixels?: number;
       alignMode?: 'wrap-align' | 'right' | 'left';
-      retainedBlankBlocks?: number;
+      skippedEmptyBlocks?: number;
+      documentLanguage?: string;
+      firmwareLanguage?: string;
+      hyphenationDictionary?: boolean;
+      hyphenationEnabled?: boolean;
       firstLineY?: number;
       lastLineY?: number;
       drawRoundingBias?: number;
