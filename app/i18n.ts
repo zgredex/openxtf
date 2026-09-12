@@ -48,7 +48,18 @@ export const TRANSLATIONS = {
     rasterSize: '래스터 크기',
     rasterSizeHint:
       '29px는 KO 포크 글꼴 비트맵에 맞춘 기본 래스터 크기입니다. 기기의 PPI를 뜻하지 않으며, 저장 셀과 줄 기준 간격은 각각 별도 설정입니다.',
-    referenceAppearance: '완성 XTF 래스터',
+    referenceAppearance: '미리보기가 읽은 완성 XTF',
+    previewXtfPending: '현재 설정으로 XTF를 다시 만드는 중…',
+    previewXtfSummary: (
+      cellW: number,
+      cellH: number,
+      bpp: number,
+      advanceY: number,
+      fullWidth: number,
+      asciiWidth: number,
+      spaceWidth: number,
+    ) =>
+      `${cellW}×${cellH} 셀 · ${bpp}bpp · 줄 기준 ${advanceY}px · 한글 ${fullWidth}px · ASCII 대체 ${asciiWidth}px · 공백 ${spaceWidth}px`,
     deviceLineSpacing: '기기 줄 간격',
     deviceLineSpacingHelp:
       '자동은 현재 페이지의 실제 줄과 문단 수에 맞춰 22~778px 영역에 줄을 재분배합니다. 숫자 옵션은 XTF advanceY(0이면 셀 높이)에 선택한 배율을 곱합니다.',
@@ -83,24 +94,27 @@ export const TRANSLATIONS = {
     deviceOnlySettingsHint:
       'V6.3.15의 독서 설정입니다. XTF 파일에는 저장되지 않으므로 기기와 같은 값을 선택하세요.',
     xtfDeviceMetrics: '기기에서 보이는 XTF 설정',
-    glyphSizeAndPosition: '비트맵 크기와 셀 안 위치',
-    textSpacingAndRhythm: '기기에 저장되는 전진 폭과 줄 간격',
-    strokeAppearance: '비트맵 명암과 획',
-    cellWidth: '비트맵 셀 너비',
-    cellHeight: '비트맵 셀 높이',
-    cropLeft: '가로 비트맵 이동',
-    cropTop: '세로 비트맵 이동',
-    storedAdvanceY: '줄 원점 기본 간격 (advanceY)',
-    fullWidthAdvance: '한글 줄바꿈·전진 폭',
-    asciiMeanWidth: 'ASCII 대체 전진 폭',
+    glyphSizeAndPosition: '글리프 비트맵 생성과 셀 배치',
+    textSpacingAndRhythm: '펌웨어가 읽는 XTF 폭과 줄 기준값',
+    strokeAppearance: 'XTF에 저장되는 픽셀과 획 모양',
+    glyphAvailability: 'XTF에 저장할 글리프',
+    glyphAvailabilityHint:
+      '문자 범위와 대체 렌더링은 실제로 저장되는 글리프 레코드를 바꿉니다. 미리보기도 같은 글리프 집합을 사용하므로 빠진 문자는 기기와 같은 대체 경로로 표시됩니다.',
+    cellWidth: '저장 셀 너비 (cellW)',
+    cellHeight: '저장 셀 높이 (cellH)',
+    cropLeft: '셀 내부 비트맵 X 이동',
+    cropTop: '셀 내부 비트맵 Y 이동',
+    storedAdvanceY: '줄 간격 기준값 (advanceY)',
+    fullWidthAdvance: '한글/CJK 1글자 폭 (fullWidth)',
+    asciiMeanWidth: 'ASCII 대체 폭 (asciiWidth)',
     ascender: '어센더',
     descender: '디센더',
-    baselineRow: '셀 안 기준선 행',
-    latinAdvanceAdjustment: '라틴·좁은 글리프 전진 폭 보정',
-    effectiveWordSpace: '단어 공백 전진 폭 (U+0020)',
+    baselineRow: '변환 기준선 행',
+    latinAdvanceAdjustment: '라틴·좁은 문자 저장 폭 보정',
+    effectiveWordSpace: '단어 공백 폭 (U+0020)',
     xtfMetricsHint:
       '아래 값은 완성 XTF의 비트맵이나 V6.3.15가 읽는 폭·간격 바이트를 바꿉니다. 값을 바꾸면 같은 완성 XTF 데이터로 미리보기를 다시 만듭니다. 기기 독서 설정은 아래의 별도 영역에 있습니다.',
-    rasterSizeHelp: 'FreeType이 원본 글꼴을 그리는 픽셀 크기입니다. 글자 비트맵의 실제 크기와 디테일을 바꾸지만 줄 간격을 직접 정하지는 않습니다.',
+    rasterSizeHelp: '변환기가 원본 글꼴을 래스터화하는 픽셀 크기입니다. 저장되는 글자 비트맵의 실제 크기와 디테일을 바꾸지만 줄 간격을 직접 정하지는 않습니다.',
     cellWidthHelp: '각 글리프에 저장되는 가로 비트맵 영역입니다. 너무 작으면 획이 잘립니다. 일반 한글의 전진 폭은 이 값이 아니라 한글 줄바꿈·전진 폭을 사용합니다.',
     cellHeightHelp: '각 글리프에 저장되는 세로 비트맵 영역입니다. 너무 작으면 위아래 획이 잘립니다. advanceY가 0일 때만 줄 간격 기준값으로도 사용됩니다.',
     cropLeftHelp: '완성 XTF 셀 안에서 비트맵만 가로로 옮깁니다. 양수는 왼쪽, 음수는 오른쪽으로 이동하며 전진 폭은 바뀌지 않습니다.',
@@ -143,9 +157,9 @@ export const TRANSLATIONS = {
       'BIN 파일에 저장되는 셀 너비를 조정합니다. 양수는 자간을 넓히고 음수는 좁히며, 너무 많이 줄이면 획이 잘릴 수 있습니다.',
     xtfSpacingHint:
       '글리프별 저장 너비를 픽셀 단위로 조정합니다. V6.3.15의 일반 한글 자간에는 적용되지 않으며, 한글은 위의 한글·CJK 전각 너비로 조정합니다. ASCII와 일부 비 CJK 유니코드 범위에는 영향을 줍니다.',
-    systemFontFallback: '시스템 글꼴 대체',
+    systemFontFallback: '브라우저 대체 글리프를 XTF에 저장',
     systemFontFallbackHint:
-      '기본 글꼴과 대체 글꼴에 없는 문자는 브라우저의 시스템 글꼴로 렌더링합니다. 기본 글꼴과 모양이 다를 수 있습니다.',
+      '기본 글꼴과 업로드한 대체 글꼴에 없는 문자를 브라우저 기본 serif로 래스터화해 XTF에 넣습니다. 이는 기기에서 자동으로 일어나는 대체가 아니며, 생성 환경에 따라 모양이 달라질 수 있습니다.',
     bmpOnly: ' BMP 문자만 지원합니다.',
     outputFilenamePattern: '출력 파일 이름 형식',
     outputFilenameHelp:
@@ -154,12 +168,14 @@ export const TRANSLATIONS = {
       '자리표시자: [fontname], [rastersize], [cellsize], [bppname], [spacing], [gamma], [thresholds], [embolden], [date], [time] 등',
     advanced: '고급 설정',
     advancedHint:
-      '출력 파일 이름, 문자 범위와 표준 프로필의 비트맵 저장 방식을 설정합니다.',
-    bitDepth: '저장 회색조',
+      '출력 파일 이름과 표준 프로필의 추가 생성 방식을 설정합니다.',
+    advancedKoreanHint:
+      '다운로드 파일 이름처럼 글자 모양과 무관한 출력 옵션입니다.',
+    bitDepth: '저장 픽셀 단계 (bpp)',
     oneBppHint: '1bpp는 이진 글리프를 사용하며 파일 크기가 더 작습니다.',
     twoBppHint:
       '2bpp는 네 단계 회색조를 사용해 글자 가장자리를 더 부드럽게 표현합니다.',
-    characterRange: '문자 범위',
+    characterRange: '저장 글리프 범위',
     characterRangeHelp:
       'XTF에 어떤 글리프 레코드를 넣을지 정합니다. 이미 포함된 글자의 모양은 바꾸지 않지만, 빠진 문자가 기기에서 대체 글리프나 상자로 표시되는지에 영향을 줍니다.',
     deviceSet: '기기 문자 세트',
@@ -168,9 +184,9 @@ export const TRANSLATIONS = {
       '기본 글꼴의 cmap에 포함된 모든 문자를 생성합니다. 시간과 메모리가 훨씬 더 많이 필요합니다.',
     deviceSetHint:
       'X4 기본 문자 세트와 추가 문자만 생성합니다. 출력이 작고 모바일에서 더 안정적입니다.',
-    renderTuning: '렌더링 조정',
-    gamma: '래스터 감마',
-    thresholds: '픽셀 양자화 임계값',
+    renderTuning: '픽셀 양자화 직접 조정',
+    gamma: '래스터 명암 곡선 (gamma)',
+    thresholds: '픽셀 단계 경계값 (t0,t1,t2)',
     symmetric: '대칭',
     manualThresholds: '수동 t0,t1,t2',
     spreadHint: (spread: number) => `간격 ${spread}, 128을 중심으로 적용합니다.`,
@@ -399,14 +415,14 @@ export const TRANSLATIONS = {
       collisions: number,
     ) =>
       `최종 XTF 셀을 X4 V6.3.15 방식으로 렌더링했습니다. ${lines}줄 · 줄 간격 ${pitch}px · 단어 간격 ${space}px · 줄 간 잉크 충돌 ${collisions}px.`,
-    supplementalCharacters: '포함할 문자',
+    supplementalCharacters: 'XTF에 추가로 저장할 문자',
     chars: '자',
     characterSummary: (defaults: number, extras: number, total: number) =>
       `기본 ${koNumber(defaults)}자, 추가 ${koNumber(extras)}자, 보조 문자 총 ${koNumber(total)}자. 탭하여 보거나 편집하세요.`,
-    defaultSupplementalCharacters: '기본 보조 문자',
+    defaultSupplementalCharacters: '기본 기기 문자 세트',
     defaultCharactersHint: (count: number) =>
       `기본으로 보조 문자 ${koNumber(count)}자를 사용합니다. 탭하여 전체 목록을 확인하세요.`,
-    extraSupplementalCharacters: '추가 보조 문자',
+    extraSupplementalCharacters: '강제로 추가할 글리프',
     extraCharactersPlaceholder:
       '선택 사항. 기본 보조 문자 세트 외에 반드시 포함할 문자를 입력하세요.',
     extraCharacterCount: (count: number) => `추가 문자 ${koNumber(count)}자`,
@@ -504,7 +520,18 @@ export const TRANSLATIONS = {
     rasterSize: 'Raster size',
     rasterSizeHint:
       "29 px is the default raster calibrated to the KO fork's glyph bitmaps. It is not the device PPI; storage-cell dimensions and the line-advance base are separate settings.",
-    referenceAppearance: 'Finished XTF raster',
+    referenceAppearance: 'Finished XTF read by the preview',
+    previewXtfPending: 'Rebuilding the XTF from the current settings…',
+    previewXtfSummary: (
+      cellW: number,
+      cellH: number,
+      bpp: number,
+      advanceY: number,
+      fullWidth: number,
+      asciiWidth: number,
+      spaceWidth: number,
+    ) =>
+      `${cellW}×${cellH} cell · ${bpp}bpp · ${advanceY}px line base · ${fullWidth}px Hangul · ${asciiWidth}px ASCII fallback · ${spaceWidth}px space`,
     deviceLineSpacing: 'Device line spacing',
     deviceLineSpacingHelp:
       "Auto redistributes the current page's actual lines and paragraph boundaries over the 22–778 px span. Numbered choices multiply XTF advanceY (or cell height when it is zero) by the selected factor.",
@@ -539,24 +566,27 @@ export const TRANSLATIONS = {
     deviceOnlySettingsHint:
       'These reproduce V6.3.15 reader settings. They are not stored in XTF, so select the same values as the device.',
     xtfDeviceMetrics: 'XTF settings visible on device',
-    glyphSizeAndPosition: 'Bitmap size and position inside the cell',
-    textSpacingAndRhythm: 'Serialized advances and line-origin step',
-    strokeAppearance: 'Bitmap tone and strokes',
-    cellWidth: 'Bitmap cell width',
-    cellHeight: 'Bitmap cell height',
-    cropLeft: 'Horizontal bitmap shift',
-    cropTop: 'Vertical bitmap shift',
-    storedAdvanceY: 'Base line-origin step (advanceY)',
-    fullWidthAdvance: 'Hangul wrap and advance width',
-    asciiMeanWidth: 'ASCII fallback advance',
+    glyphSizeAndPosition: 'Glyph bitmap generation and cell placement',
+    textSpacingAndRhythm: 'XTF widths and line base read by firmware',
+    strokeAppearance: 'Pixels and stroke shape stored in XTF',
+    glyphAvailability: 'Glyphs stored in the XTF',
+    glyphAvailabilityHint:
+      'Coverage and fallback rendering change which glyph records are actually stored. The preview uses that same glyph set, so absent characters follow the same replacement path as the device.',
+    cellWidth: 'Stored cell width (cellW)',
+    cellHeight: 'Stored cell height (cellH)',
+    cropLeft: 'Bitmap X shift inside cell',
+    cropTop: 'Bitmap Y shift inside cell',
+    storedAdvanceY: 'Line-spacing base (advanceY)',
+    fullWidthAdvance: 'Hangul/CJK character width (fullWidth)',
+    asciiMeanWidth: 'ASCII fallback width (asciiWidth)',
     ascender: 'Ascender',
     descender: 'Descender',
-    baselineRow: 'Baseline row inside cell',
-    latinAdvanceAdjustment: 'Latin and narrow-glyph advance adjustment',
-    effectiveWordSpace: 'Word-space advance (U+0020)',
+    baselineRow: 'Conversion baseline row',
+    latinAdvanceAdjustment: 'Stored-width adjustment for Latin/narrow glyphs',
+    effectiveWordSpace: 'Word-space width (U+0020)',
     xtfMetricsHint:
       'Every value below changes either the finished XTF bitmap or a width/spacing byte read by V6.3.15. An edit rebuilds the XTF and reruns the preview from those same finished bytes. Device reading options remain in their separate section.',
-    rasterSizeHelp: 'The FreeType pixel size used before packing. It changes the actual bitmap scale and detail, but does not directly set line spacing.',
+    rasterSizeHelp: 'The pixel size at which the converter rasterizes the source font. It changes the actual stored bitmap scale and detail, but does not directly set line spacing.',
     cellWidthHelp: 'The horizontal bitmap area stored for every glyph. A value that is too small clips ink. Ordinary Hangul advances by the Hangul width setting, not by cell width.',
     cellHeightHelp: 'The vertical bitmap area stored for every glyph. A value that is too small clips top or bottom ink. It also becomes the line-step fallback only when advanceY is zero.',
     cropLeftHelp: 'Moves only the serialized bitmap inside its cell: positive is left and negative is right. It does not change the advance width.',
@@ -599,9 +629,9 @@ export const TRANSLATIONS = {
       'Changes the cell width stored in the BIN file. Positive values loosen spacing; negative values tighten it and may crop strokes if too large.',
     xtfSpacingHint:
       'Adjusts stored per-glyph widths. V6.3.15 does not use this for ordinary Hangul; tune Hangul with the Hangul/CJK full width above. It affects ASCII and selected non-CJK Unicode ranges.',
-    systemFontFallback: 'System font fallback',
+    systemFontFallback: 'Bake browser fallback glyphs into XTF',
     systemFontFallbackHint:
-      "Characters missing from both the main and supplemental fonts are rendered with the browser's system font. Their style may differ from the main font.",
+      "Rasterize characters missing from the main and uploaded fallback fonts with the browser's default serif and store them in the XTF. This is not an automatic device fallback, and its appearance can vary by build environment.",
     bmpOnly: ' BMP characters only.',
     outputFilenamePattern: 'Output filename pattern',
     outputFilenameHelp:
@@ -610,11 +640,13 @@ export const TRANSLATIONS = {
       'Placeholders: [fontname], [rastersize], [cellsize], [bppname], [spacing], [gamma], [thresholds], [embolden], [date], [time], etc.',
     advanced: 'Advanced',
     advancedHint:
-      'Choose the output filename, character coverage, and standard-profile bitmap packing.',
-    bitDepth: 'Stored grayscale',
+      'Choose the output filename and additional standard-profile generation behavior.',
+    advancedKoreanHint:
+      'Output options such as the downloaded filename; these do not change the glyph appearance.',
+    bitDepth: 'Stored pixel levels (bpp)',
     oneBppHint: '1bpp uses binary glyphs and smaller files.',
     twoBppHint: '2bpp uses four gray levels for smoother text edges.',
-    characterRange: 'Character range',
+    characterRange: 'Stored glyph coverage',
     characterRangeHelp:
       'Chooses which glyph records are stored in the XTF. It does not alter an included glyph, but it determines whether an absent character becomes a replacement glyph or generated box on device.',
     deviceSet: 'Device set',
@@ -623,9 +655,9 @@ export const TRANSLATIONS = {
       'Generate every character exposed by the main font cmap. This takes much more time and memory.',
     deviceSetHint:
       'Generate only the X4 default set plus your extra characters. Smaller output and more stable on mobile.',
-    renderTuning: 'Render tuning',
-    gamma: 'Raster gamma',
-    thresholds: 'Pixel quantization thresholds',
+    renderTuning: 'Direct pixel quantization controls',
+    gamma: 'Raster tone curve (gamma)',
+    thresholds: 'Pixel-level boundaries (t0,t1,t2)',
     symmetric: 'Symmetric',
     manualThresholds: 'Manual t0,t1,t2',
     spreadHint: (spread: number) => `Spread ${spread}, centered around 128.`,
@@ -855,14 +887,14 @@ export const TRANSLATIONS = {
       collisions: number,
     ) =>
       `Rendered from final XTF cells with the X4 V6.3.15 path: ${lines} line(s), ${pitch} px pitch, ${space} px word space, ${collisions} px of cross-line ink collision.`,
-    supplementalCharacters: 'Character set',
+    supplementalCharacters: 'Additional characters to store in XTF',
     chars: ' chars',
     characterSummary: (defaults: number, extras: number, total: number) =>
       `${enNumber(defaults)} default, ${enNumber(extras)} extra; ${enNumber(total)} supplemental characters total. Tap to view or edit.`,
-    defaultSupplementalCharacters: 'Default supplemental characters',
+    defaultSupplementalCharacters: 'Default device character set',
     defaultCharactersHint: (count: number) =>
       `${enNumber(count)} supplemental characters are used by default. Tap to view the full list.`,
-    extraSupplementalCharacters: 'Extra supplemental characters',
+    extraSupplementalCharacters: 'Force-include glyphs',
     extraCharactersPlaceholder:
       'Optional. Enter characters to force-include beyond the default supplemental set.',
     extraCharacterCount: (count: number) => `${enNumber(count)} extra character(s)`,

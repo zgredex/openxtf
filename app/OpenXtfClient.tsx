@@ -1193,7 +1193,19 @@ export default function OpenXtfClient() {
                 <div className="device-profile-panel space-y-4">
                   <div className="profile-summary">
                     <span>{copy.referenceAppearance}</span>
-                    <strong>{fontSize} px · {bpp} bpp</strong>
+                    <strong>
+                      {diagnosticHeader
+                        ? copy.previewXtfSummary(
+                            diagnosticHeader.cellW,
+                            diagnosticHeader.cellH,
+                            diagnosticHeader.bpp,
+                            diagnosticHeader.effectiveAdvanceY,
+                            diagnosticHeader.fullWidth,
+                            diagnosticHeader.asciiWidth,
+                            diagnosticWordSpace,
+                          )
+                        : copy.previewXtfPending}
+                    </strong>
                   </div>
 
                   <div className="appearance-heading">
@@ -1346,6 +1358,70 @@ export default function OpenXtfClient() {
                     {strokeControls}
                     {rasterToneControls}
                   </section>
+
+                  <section className="appearance-group space-y-3">
+                    <div>
+                      <p className="appearance-group-title">
+                        {copy.glyphAvailability}
+                      </p>
+                      <p className="hint mt-1">
+                        {copy.glyphAvailabilityHint}
+                      </p>
+                    </div>
+                    <div
+                      className="space-y-2 setting-help-host"
+                      title={copy.characterRangeHelp}
+                    >
+                      <span className="field-label">
+                        <SettingLabel
+                          label={copy.characterRange}
+                          help={copy.characterRangeHelp}
+                        />
+                      </span>
+                      <div className="grid grid-cols-2 gap-2">
+                        <SegmentButton
+                          active={glyphScope === 'device'}
+                          onClick={() => setGlyphScope('device')}
+                        >
+                          {copy.deviceSet}
+                        </SegmentButton>
+                        <SegmentButton
+                          active={glyphScope === 'full'}
+                          onClick={() => setGlyphScope('full')}
+                        >
+                          {copy.fullFont}
+                        </SegmentButton>
+                      </div>
+                      <p className="hint">
+                        {glyphScope === 'full'
+                          ? copy.fullFontHint
+                          : copy.deviceSetHint}
+                      </p>
+                    </div>
+                    <label
+                      className="fallback-row setting-help-host"
+                      title={copy.systemFontFallbackHint}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={systemFallback}
+                        onChange={(event) =>
+                          setSystemFallback(event.target.checked)
+                        }
+                      />
+                      <span>
+                        <strong className="field-label block">
+                          <SettingLabel
+                            label={copy.systemFontFallback}
+                            help={copy.systemFontFallbackHint}
+                          />
+                        </strong>
+                        <span className="hint block">
+                          {copy.systemFontFallbackHint}
+                        </span>
+                      </span>
+                    </label>
+                  </section>
                 </div>
               ) : (
                 <>
@@ -1385,28 +1461,30 @@ export default function OpenXtfClient() {
                 />
               ) : null}
 
-              <label
-                className="fallback-row setting-help-host"
-                title={copy.systemFontFallbackHint}
-              >
-                <input
-                  type="checkbox"
-                  checked={systemFallback}
-                  onChange={(event) => setSystemFallback(event.target.checked)}
-                />
-                <span>
-                  <strong className="field-label block">
-                    <SettingLabel
-                      label={copy.systemFontFallback}
-                      help={copy.systemFontFallbackHint}
-                    />
-                  </strong>
-                  <span className="hint block">
-                    {copy.systemFontFallbackHint}
-                    {format === 'legacy-bin' ? copy.bmpOnly : ''}
+              {!koreanProfileActive ? (
+                <label
+                  className="fallback-row setting-help-host"
+                  title={copy.systemFontFallbackHint}
+                >
+                  <input
+                    type="checkbox"
+                    checked={systemFallback}
+                    onChange={(event) => setSystemFallback(event.target.checked)}
+                  />
+                  <span>
+                    <strong className="field-label block">
+                      <SettingLabel
+                        label={copy.systemFontFallback}
+                        help={copy.systemFontFallbackHint}
+                      />
+                    </strong>
+                    <span className="hint block">
+                      {copy.systemFontFallbackHint}
+                      {format === 'legacy-bin' ? copy.bmpOnly : ''}
+                    </span>
                   </span>
-                </span>
-              </label>
+                </label>
+              ) : null}
 
               <div className="advanced-shell">
                 <button
@@ -1419,7 +1497,11 @@ export default function OpenXtfClient() {
                 </button>
                 {advanced ? (
                   <div className="advanced-content space-y-4">
-                    <p className="hint">{copy.advancedHint}</p>
+                    <p className="hint">
+                      {koreanProfileActive
+                        ? copy.advancedKoreanHint
+                        : copy.advancedHint}
+                    </p>
                     <label
                       className="block space-y-1.5 setting-help-host"
                       title={copy.outputFilenameHelp}
@@ -1441,36 +1523,38 @@ export default function OpenXtfClient() {
                     {format === 'xtf' ? (
                       <>
                         {!koreanProfileActive ? bitDepthControls : null}
-                        <div
-                          className="space-y-2 setting-help-host"
-                          title={copy.characterRangeHelp}
-                        >
-                          <span className="field-label">
-                            <SettingLabel
-                              label={copy.characterRange}
-                              help={copy.characterRangeHelp}
-                            />
-                          </span>
-                          <div className="grid grid-cols-2 gap-2">
-                            <SegmentButton
-                              active={glyphScope === 'device'}
-                              onClick={() => setGlyphScope('device')}
-                            >
-                              {copy.deviceSet}
-                            </SegmentButton>
-                            <SegmentButton
-                              active={glyphScope === 'full'}
-                              onClick={() => setGlyphScope('full')}
-                            >
-                              {copy.fullFont}
-                            </SegmentButton>
+                        {!koreanProfileActive ? (
+                          <div
+                            className="space-y-2 setting-help-host"
+                            title={copy.characterRangeHelp}
+                          >
+                            <span className="field-label">
+                              <SettingLabel
+                                label={copy.characterRange}
+                                help={copy.characterRangeHelp}
+                              />
+                            </span>
+                            <div className="grid grid-cols-2 gap-2">
+                              <SegmentButton
+                                active={glyphScope === 'device'}
+                                onClick={() => setGlyphScope('device')}
+                              >
+                                {copy.deviceSet}
+                              </SegmentButton>
+                              <SegmentButton
+                                active={glyphScope === 'full'}
+                                onClick={() => setGlyphScope('full')}
+                              >
+                                {copy.fullFont}
+                              </SegmentButton>
+                            </div>
+                            <p className="hint">
+                              {glyphScope === 'full'
+                                ? copy.fullFontHint
+                                : copy.deviceSetHint}
+                            </p>
                           </div>
-                          <p className="hint">
-                            {glyphScope === 'full'
-                              ? copy.fullFontHint
-                              : copy.deviceSetHint}
-                          </p>
-                        </div>
+                        ) : null}
                         {!koreanProfileActive ? rasterToneControls : null}
                       </>
                     ) : null}

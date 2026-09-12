@@ -530,10 +530,8 @@ a {
 }
 
 .profile-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 4px;
   border-radius: 12px;
   background: #eaf2ff;
   color: #475569;
@@ -544,6 +542,9 @@ a {
 .profile-summary strong {
   color: #1e3a8a;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .dark .profile-summary {

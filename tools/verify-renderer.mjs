@@ -19,7 +19,9 @@ try {
     logLevel: 'silent',
   });
 
-  const { renderXtfDevicePreview } = await import(pathToFileURL(bundlePath).href);
+  const { applyKoreanX4Profile, renderXtfDevicePreview } = await import(
+    pathToFileURL(bundlePath).href
+  );
 
   globalThis.document = {
     createElement(name) {
@@ -44,6 +46,51 @@ try {
   };
 
   const xtf = makeFixtureXtf();
+  const profiled = applyKoreanX4Profile(
+    {
+      bytes: xtf,
+      fileName: 'fixture.xtf',
+      previewDataUrl: '',
+      summary: {
+        version: '1.5',
+        fontSize: 29,
+        bpp: 1,
+        cellW: 1,
+        cellH: 1,
+        glyphCount: 96,
+        requestedCount: 96,
+        missingCount: 0,
+        systemFallbackCount: 0,
+        rangeCount: 2,
+        bytesPerGlyph: 3,
+        fileSize: xtf.length,
+      },
+    },
+    {
+      cellW: 39,
+      cellH: 38,
+      cropLeft: 0,
+      cropTop: 0,
+      advanceY: 38,
+      fullWidth: 28,
+      asciiWidth: 18,
+      spaceWidth: 9,
+      ascender: 0,
+      descender: 0,
+      strictCrop: false,
+    },
+  );
+  const profiledPreview = renderXtfDevicePreview(profiled.bytes, 'A A', 29);
+  assert.equal(profiledPreview.device.xtfHeader.cellW, 39);
+  assert.equal(profiledPreview.device.xtfHeader.cellH, 38);
+  assert.equal(profiledPreview.device.xtfHeader.storedAdvanceY, 38);
+  assert.equal(profiledPreview.device.xtfHeader.fullWidth, 28);
+  assert.equal(profiledPreview.device.xtfHeader.asciiWidth, 18);
+  assert.equal(
+    profiledPreview.device.spaces.find((entry) => entry.codePoint === 0x20)
+      .paintAdvance,
+    9,
+  );
   const paragraphBlocks = Array.from({ length: 30 }, (_, index) => ({
     text: String.fromCharCode(0x41 + (index % 26)),
     tag: 'p',
@@ -120,6 +167,88 @@ try {
   assert.equal(narrowHangul.device.xtfHeader.fullWidth, 28);
   assert.equal(wideHangul.device.xtfHeader.fullWidth, 30);
 
+  const spacedHangul = `${'가'.repeat(7)} ${'가'.repeat(20)}`;
+  const aligned = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'wrap-align',
+    },
+  });
+  const right = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'right',
+    },
+  });
+  const left = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'left',
+    },
+  });
+  assert.equal(aligned.device.lines[0].placementBranch, 'space-distribution');
+  assert.equal(aligned.device.lines[0].justificationPixels, 17);
+  assert.equal(right.device.lines[0].placementBranch, 'space-distribution');
+  assert.equal(right.device.lines[0].justificationPixels, 17);
+  assert.equal(right.device.lines[0].alignment, 'wrap-align');
+  assert.equal(right.device.lines[0].requestedAlignment, 'right');
+  assert.equal(left.device.lines[0].placementBranch, 'direct');
+  assert.equal(left.device.lines[0].justificationPixels, 0);
+
+  const explicitEndings = renderXtfDevicePreview(xtf, '', 29, {
+    blocks: [
+      {
+        text: 'A\tB',
+        tag: 'p',
+        className: '',
+        breakAfter: 'soft',
+        startsParagraph: true,
+      },
+      {
+        text: 'C',
+        tag: 'p',
+        className: '',
+        breakAfter: 'paragraph',
+        startsParagraph: false,
+      },
+      {
+        text: 'D',
+        tag: 'p',
+        className: '',
+        breakAfter: 'text-end',
+        startsParagraph: true,
+      },
+    ],
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'wrap-align',
+    },
+  });
+  assert.equal(explicitEndings.device.lines[0].text, '  A B');
+  assert.deepEqual(explicitEndings.device.lines[0].recordSuffixBytes, [0x05, 0x0a]);
+  assert.equal(explicitEndings.device.lines[0].placementBranch, 'direct');
+  assert.deepEqual(explicitEndings.device.lines[1].recordSuffixBytes, [0x0a]);
+  assert.equal(explicitEndings.device.lines[2].endOfSourceFlag, true);
+
+  const fallbackGlyph = narrowHangul.device.glyphs.find(
+    (glyph) => glyph.codePoint === 0xac00,
+  );
+  assert.equal(fallbackGlyph.fallbackSource, 'question');
+  assert.equal(fallbackGlyph.renderedCodePoint, 0x3f);
+  assert.equal(fallbackGlyph.layoutAdvance, 28);
+
+  assert.equal(manual.device.pageUsage.truncated, true);
+  assert.ok(manual.device.pageUsage.remainingCharacters > 0);
+  assert.ok(manual.device.pageUsage.firstHiddenCharacter);
+
   process.stdout.write('V6.3.15 renderer fixtures passed.\n');
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
@@ -129,13 +258,13 @@ function makeFixtureXtf() {
   const headerSize = 64;
   const rangeTableOffset = headerSize;
   const rangeCount = 2;
-  const glyphDataOffset = rangeTableOffset + rangeCount * 16;
   const asciiCount = 0x7f - 0x20;
+  const asciiWidthOffset = rangeTableOffset + rangeCount * 16;
+  const glyphDataOffset = asciiWidthOffset + asciiCount;
   const glyphCount = asciiCount + 1;
   const bytesPerGlyph = 3;
   const glyphDataSize = glyphCount * bytesPerGlyph;
-  const asciiWidthOffset = glyphDataOffset + glyphDataSize;
-  const bytes = new Uint8Array(asciiWidthOffset + asciiCount);
+  const bytes = new Uint8Array(glyphDataOffset + glyphDataSize);
   const view = new DataView(bytes.buffer);
 
   bytes.set([0x58, 0x54, 0x46, 0x30], 0);
