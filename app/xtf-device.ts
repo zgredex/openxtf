@@ -32,7 +32,9 @@ export const DEFAULT_KOREAN_X4_SETTINGS: KoreanX4Settings = {
   spaceWidth: 9,
   ascender: 28,
   descender: -9,
-  strictCrop: true,
+  // Clipping is reported by diagnostics instead of blocking custom output.
+  // This switch changes validation only, not any serialized appearance byte.
+  strictCrop: false,
 };
 
 export type DeviceLineSpacing = 'auto' | 1.2 | 1.4 | 1.6 | 1.8 | 2;
@@ -254,10 +256,13 @@ export function applyKoreanX4Profile(
   const targetH = byteSetting(settings.cellH, 'cellH');
   const cropLeft = integerSetting(settings.cropLeft, -255, 255, 'cropLeft');
   const cropTop = integerSetting(settings.cropTop, -255, 255, 'cropTop');
-  const targetAdvanceY = byteSetting(settings.advanceY, 'advanceY');
+  const targetAdvanceY = byteSettingAllowZero(settings.advanceY, 'advanceY');
   const targetFullWidth = byteSetting(settings.fullWidth, 'fullWidth');
   const targetAsciiWidth = byteSetting(settings.asciiWidth, 'asciiWidth');
-  const targetSpaceWidth = byteSetting(settings.spaceWidth, 'spaceWidth');
+  const targetSpaceWidth = byteSettingAllowZero(
+    settings.spaceWidth,
+    'spaceWidth',
+  );
   const targetAscender = integerSetting(
     settings.ascender,
     -32768,
@@ -361,11 +366,11 @@ export function applyKoreanX4Profile(
   view.setUint32(0x28, targetBytesPerGlyph, true);
   view.setUint32(0x2c, targetGlyphDataSize, true);
 
-  const effectiveSpace = targetSpaceWidth;
+  const storedSpace = targetSpaceWidth;
   if (source.header.asciiWidthCount > 0) {
-    output[source.header.asciiWidthOffset] = effectiveSpace;
+    output[source.header.asciiWidthOffset] = storedSpace;
   }
-  patchStoredAdvance(output, source, 0x20, effectiveSpace, targetBytesPerGlyph);
+  patchStoredAdvance(output, source, 0x20, storedSpace, targetBytesPerGlyph);
   patchStoredAdvance(
     output,
     source,
@@ -388,7 +393,7 @@ export function applyKoreanX4Profile(
     sourceCellH: source.header.cellH,
     croppedInkPixels,
     croppedGlyphs,
-    effectiveSpace,
+    effectiveSpace: storedSpace || targetAsciiWidth,
   };
 
   return {
@@ -2998,6 +3003,10 @@ function rowStride(cellW: number, bpp: 1 | 2) {
 
 function byteSetting(value: number, name: string) {
   return integerSetting(value, 1, 255, name);
+}
+
+function byteSettingAllowZero(value: number, name: string) {
+  return integerSetting(value, 0, 255, name);
 }
 
 function integerSetting(value: number, minimum: number, maximum: number, name: string) {

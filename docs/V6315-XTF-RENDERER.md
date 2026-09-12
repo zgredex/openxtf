@@ -821,6 +821,44 @@ Line-spacing selector, paragraph ratio, first-line indent, alignment mode,
 framebuffer margins, centering markers, and page pagination are firmware/runtime
 state. They are not properties stored in an XTF file.
 
+### OpenXTF control-to-preview contract
+
+The Korean-reading editor exposes the appearance-affecting conversion inputs
+below. Each change invalidates the finished-XTF cache, rebuilds the same XTF
+bytes that would be downloaded, parses those bytes again, and supplies them to
+the V6.3.15 preview. The preview does not use CSS font metrics or a parallel
+browser-font approximation.
+
+| OpenXTF control | What is changed in the generated XTF | V6.3.15-visible result |
+| --- | --- | --- |
+| Font source and supplemental-font order | Source of each packed glyph bitmap and its source metrics | Typeface, glyph shape, and which font supplies a missing character |
+| Raster size | FreeType input pixel size before packing | Glyph scale and bitmap detail; it does not directly set the firmware line step |
+| Bitmap cell width/height | Header `cellW`/`cellH`, row stride, record size, and repacked bitmap bounds | Drawable bitmap area and clipping; `cellH` is also the line-step fallback when `advanceY=0` |
+| Horizontal/vertical bitmap shift | Pixel position inside every repacked cell | Visible glyph position without changing the nominal pen advance or line origin |
+| Baseline row inside cell | Baseline used while OpenXTF repacks source pixels; the same value is stored as ascender metadata | Visible vertical position of packed pixels. The firmware does not apply the stored ascender a second time |
+| Hangul wrap and advance width | Header `fullWidth` and stored U+3000 advance | Ordinary Hangul/CJK wrap measurement, painted advance, and CJK first-line indentation |
+| Base line-origin step | Header `advanceY` | Firmware line-spacing base and page-capacity input; zero selects `cellH` |
+| ASCII fallback advance | Header `asciiWidth` | Advance for zero/missing ASCII-table entries and the verified internal one-byte fallback routes |
+| Word-space advance | U+0020 ASCII-width-table entry and U+0020 glyph metadata | Actual ordinary-space width before any firmware justification; zero falls back to `asciiWidth` |
+| Latin and narrow-glyph advance adjustment | Source-derived per-glyph advance metadata and printable-ASCII width entries | Latin/ASCII and the verified narrow metadata ranges only; ordinary Hangul remains controlled by `fullWidth` |
+| Stored grayscale | Header bpp and repacked bitmap planes | Binary 1-bpp or four-level 2-bpp glyph edges |
+| Stroke-darkness preset | Gamma and quantization-threshold inputs | A convenient preset that changes the packed pixel levels; it is not a separate firmware field |
+| Stroke weight | Bitmap morphology before packing | Thicker or thinner stored strokes |
+| Raster gamma and pixel thresholds | Tone curve and final 1-bpp/2-bpp quantization | Exact stored pixel levels and ink bounds |
+| Character range and extra characters | Range table, glyph count, and glyph records | Whether a code point has a direct glyph or enters the firmware replacement/box fallback chain |
+| Browser system-font fallback | Adds packed glyphs rendered by the browser only for still-uncovered code points | Those characters use a system typeface instead of the firmware replacement chain |
+
+The raw XTF descender header value is intentionally not an appearance control:
+the active page path does not consult it for placement. The ascender header is
+also not advertised as a firmware positioning metric; the visible “baseline
+row” control is a conversion operation that moves pixels before serialization.
+Likewise, the former strict-crop switch affected only OpenXTF validation and
+not one output byte, so it is hidden. Ink lost outside the selected cell remains
+reported by diagnostics without blocking a deliberately chosen geometry.
+
+The output filename is retained as an output-management option and is explicitly
+described as non-visual. It does not change XTF bytes or the preview.
+
 `FUN_4204507c` clips each painted cell to the 480×800 framebuffer. Its 2-bpp
 loop reads each source byte in the exact pair order bits 7–6, 5–4, 3–2, 1–0.
 Source bit 0 clears the corresponding pixel in framebuffer plane 0 and source

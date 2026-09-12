@@ -874,8 +874,90 @@ export default function OpenXtfClient() {
         number={binThreshold}
         onChange={setBinThreshold}
         hint={copy.bitmapThresholdHint}
+        tooltip={copy.bitmapThresholdHint}
       />
     );
+
+  const bitDepthControls = (
+    <div className="space-y-2 setting-help-host" title={copy.bitDepthHelp}>
+      <SettingLabel label={copy.bitDepth} help={copy.bitDepthHelp} />
+      <div className="grid grid-cols-2 gap-2">
+        <SegmentButton active={bpp === 1} onClick={() => setBpp(1)}>
+          1 bpp
+        </SegmentButton>
+        <SegmentButton active={bpp === 2} onClick={() => setBpp(2)}>
+          2 bpp
+        </SegmentButton>
+      </div>
+      <p className="hint">{bpp === 1 ? copy.oneBppHint : copy.twoBppHint}</p>
+    </div>
+  );
+
+  const rasterToneControls = (
+    <div className="render-tuning space-y-2">
+      <p className="field-label">{copy.renderTuning}</p>
+      <RangeField
+        label={copy.gamma}
+        value={gamma.toFixed(2)}
+        min={0.5}
+        max={3}
+        step={0.05}
+        number={gamma}
+        onChange={(value) => {
+          setGamma(value);
+          setWeight('custom');
+        }}
+        hint=""
+        tooltip={copy.gammaHelp}
+      />
+      <div
+        className="flex items-center justify-between gap-3 setting-help-host"
+        title={copy.thresholdsHelp}
+      >
+        <SettingLabel label={copy.thresholds} help={copy.thresholdsHelp} />
+        <span className="mono">{actualThresholds}</span>
+      </div>
+      <select
+        className="input"
+        value={thresholdMode}
+        onChange={(event) => {
+          setThresholdMode(event.target.value as 'symmetric' | 'custom');
+          setWeight('custom');
+        }}
+      >
+        <option value="symmetric">{copy.symmetric}</option>
+        <option value="custom">{copy.manualThresholds}</option>
+      </select>
+      {thresholdMode === 'symmetric' ? (
+        <RangeField
+          label=""
+          value=""
+          min={8}
+          max={127}
+          step={1}
+          number={thresholdSpread}
+          onChange={(value) => {
+            setThresholdSpread(value);
+            setWeight('custom');
+          }}
+          hint={copy.spreadHint(thresholdSpread)}
+          tooltip={copy.thresholdsHelp}
+        />
+      ) : (
+        <input
+          className="input"
+          value={thresholds}
+          aria-label={copy.thresholds}
+          title={copy.thresholdsHelp}
+          placeholder="64,128,192"
+          onChange={(event) => {
+            setThresholds(event.target.value);
+            setWeight('custom');
+          }}
+        />
+      )}
+    </div>
+  );
 
   return (
     <div className="app-shell min-h-screen">
@@ -1174,29 +1256,19 @@ export default function OpenXtfClient() {
                         help={copy.cropTopHelp}
                         onChange={(value) => updateKoreanSetting('cropTop', value)}
                       />
-                    </div>
-
-                    <label
-                      className="fallback-row compact-fallback-row setting-help-host"
-                      title={copy.protectInkHelp}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={koreanSettings.strictCrop}
-                        onChange={(event) =>
-                          updateKoreanSetting('strictCrop', event.target.checked)
+                      <NumberField
+                        label={copy.baselineRow}
+                        value={koreanSettings.ascender}
+                        min={-32768}
+                        max={32767}
+                        step={1}
+                        suffix="px"
+                        help={copy.baselineRowHelp}
+                        onChange={(value) =>
+                          updateKoreanSetting('ascender', value)
                         }
                       />
-                      <span>
-                        <strong className="field-label block">
-                          <SettingLabel
-                            label={copy.protectInk}
-                            help={copy.protectInkHelp}
-                          />
-                        </strong>
-                        <span className="hint block">{copy.protectInkHint}</span>
-                      </span>
-                    </label>
+                    </div>
                   </section>
 
                   <section className="appearance-group">
@@ -1219,7 +1291,7 @@ export default function OpenXtfClient() {
                       <NumberField
                         label={copy.storedAdvanceY}
                         value={koreanSettings.advanceY}
-                        min={1}
+                        min={0}
                         max={255}
                         step={1}
                         suffix="px"
@@ -1253,28 +1325,40 @@ export default function OpenXtfClient() {
                         }
                       />
                     </div>
+                    <RangeField
+                      label={copy.latinAdvanceAdjustment}
+                      value={`${letterSpacing > 0 ? '+' : ''}${letterSpacing} px`}
+                      min={-12}
+                      max={16}
+                      step={1}
+                      number={letterSpacing}
+                      onChange={setLetterSpacing}
+                      hint={copy.xtfSpacingHint}
+                      tooltip={copy.latinAdvanceAdjustmentHelp}
+                    />
                   </section>
 
                   <section className="appearance-group space-y-4">
                     <p className="appearance-group-title">
                       {copy.strokeAppearance}
                     </p>
+                    {bitDepthControls}
                     {strokeControls}
+                    {rasterToneControls}
                   </section>
                 </div>
               ) : (
                 <>
-                  <label className="block space-y-1.5">
-                    <span className="field-label">{copy.fontSize}</span>
-                    <input
-                      className="input"
-                      type="number"
-                      min={1}
-                      max={255}
-                      value={fontSize}
-                      onChange={(event) => setFontSize(Number(event.target.value))}
-                    />
-                  </label>
+                  <NumberField
+                    label={copy.rasterSize}
+                    value={fontSize}
+                    min={1}
+                    max={255}
+                    step={1}
+                    suffix="px"
+                    help={copy.rasterSizeHelp}
+                    onChange={setFontSize}
+                  />
                   {strokeControls}
                 </>
               )}
@@ -1293,10 +1377,18 @@ export default function OpenXtfClient() {
                       ? copy.binSpacingHint
                       : copy.xtfSpacingHint
                   }
+                  tooltip={
+                    format === 'legacy-bin'
+                      ? copy.binSpacingHint
+                      : copy.xtfSpacingHint
+                  }
                 />
               ) : null}
 
-              <label className="fallback-row">
+              <label
+                className="fallback-row setting-help-host"
+                title={copy.systemFontFallbackHint}
+              >
                 <input
                   type="checkbox"
                   checked={systemFallback}
@@ -1304,7 +1396,10 @@ export default function OpenXtfClient() {
                 />
                 <span>
                   <strong className="field-label block">
-                    {copy.systemFontFallback}
+                    <SettingLabel
+                      label={copy.systemFontFallback}
+                      help={copy.systemFontFallbackHint}
+                    />
                   </strong>
                   <span className="hint block">
                     {copy.systemFontFallbackHint}
@@ -1325,9 +1420,15 @@ export default function OpenXtfClient() {
                 {advanced ? (
                   <div className="advanced-content space-y-4">
                     <p className="hint">{copy.advancedHint}</p>
-                    <label className="block space-y-1.5">
+                    <label
+                      className="block space-y-1.5 setting-help-host"
+                      title={copy.outputFilenameHelp}
+                    >
                       <span className="field-label">
-                        {copy.outputFilenamePattern}
+                        <SettingLabel
+                          label={copy.outputFilenamePattern}
+                          help={copy.outputFilenameHelp}
+                        />
                       </span>
                       <input
                         className="input"
@@ -1339,110 +1440,38 @@ export default function OpenXtfClient() {
                     </label>
                     {format === 'xtf' ? (
                       <>
-                      <div className="space-y-2">
-                        <span className="field-label">{copy.bitDepth}</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <SegmentButton
-                            active={bpp === 1}
-                            onClick={() => setBpp(1)}
-                          >
-                            1 bpp
-                          </SegmentButton>
-                          <SegmentButton
-                            active={bpp === 2}
-                            onClick={() => setBpp(2)}
-                          >
-                            2 bpp
-                          </SegmentButton>
-                        </div>
-                        <p className="hint">
-                          {bpp === 1
-                            ? copy.oneBppHint
-                            : copy.twoBppHint}
-                        </p>
-                      </div>
-                      <div className="space-y-2">
-                        <span className="field-label">{copy.characterRange}</span>
-                        <div className="grid grid-cols-2 gap-2">
-                          <SegmentButton
-                            active={glyphScope === 'device'}
-                            onClick={() => setGlyphScope('device')}
-                          >
-                            {copy.deviceSet}
-                          </SegmentButton>
-                          <SegmentButton
-                            active={glyphScope === 'full'}
-                            onClick={() => setGlyphScope('full')}
-                          >
-                            {copy.fullFont}
-                          </SegmentButton>
-                        </div>
-                        <p className="hint">
-                          {glyphScope === 'full'
-                            ? copy.fullFontHint
-                            : copy.deviceSetHint}
-                        </p>
-                      </div>
-                      <div className="render-tuning space-y-2">
-                        <p className="field-label">{copy.renderTuning}</p>
-                        <RangeField
-                          label={copy.gamma}
-                          value={gamma.toFixed(2)}
-                          min={0.5}
-                          max={3}
-                          step={0.05}
-                          number={gamma}
-                          onChange={(value) => {
-                            setGamma(value);
-                            setWeight('custom');
-                          }}
-                          hint=""
-                        />
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="field-label">
-                            {copy.thresholds}
-                          </span>
-                          <span className="mono">{actualThresholds}</span>
-                        </div>
-                        <select
-                          className="input"
-                          value={thresholdMode}
-                          onChange={(event) => {
-                            setThresholdMode(
-                              event.target.value as 'symmetric' | 'custom',
-                            );
-                            setWeight('custom');
-                          }}
+                        {!koreanProfileActive ? bitDepthControls : null}
+                        <div
+                          className="space-y-2 setting-help-host"
+                          title={copy.characterRangeHelp}
                         >
-                          <option value="symmetric">{copy.symmetric}</option>
-                          <option value="custom">{copy.manualThresholds}</option>
-                        </select>
-                        {thresholdMode === 'symmetric' ? (
-                          <RangeField
-                            label=""
-                            value=""
-                            min={8}
-                            max={127}
-                            step={1}
-                            number={thresholdSpread}
-                            onChange={(value) => {
-                              setThresholdSpread(value);
-                              setWeight('custom');
-                            }}
-                            hint={copy.spreadHint(thresholdSpread)}
-                          />
-                        ) : (
-                          <input
-                            className="input"
-                            value={thresholds}
-                            placeholder="64,128,192"
-                            onChange={(event) => {
-                              setThresholds(event.target.value);
-                              setWeight('custom');
-                            }}
-                          />
-                        )}
-                      </div>
+                          <span className="field-label">
+                            <SettingLabel
+                              label={copy.characterRange}
+                              help={copy.characterRangeHelp}
+                            />
+                          </span>
+                          <div className="grid grid-cols-2 gap-2">
+                            <SegmentButton
+                              active={glyphScope === 'device'}
+                              onClick={() => setGlyphScope('device')}
+                            >
+                              {copy.deviceSet}
+                            </SegmentButton>
+                            <SegmentButton
+                              active={glyphScope === 'full'}
+                              onClick={() => setGlyphScope('full')}
+                            >
+                              {copy.fullFont}
+                            </SegmentButton>
+                          </div>
+                          <p className="hint">
+                            {glyphScope === 'full'
+                              ? copy.fullFontHint
+                              : copy.deviceSetHint}
+                          </p>
+                        </div>
+                        {!koreanProfileActive ? rasterToneControls : null}
                       </>
                     ) : null}
                   </div>
