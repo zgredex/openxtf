@@ -1972,6 +1972,29 @@ html:lang(ko) .notice-dialog p {
   background: color-mix(in srgb, var(--paper) 94%, transparent);
 }
 
+.firmware-research-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-deep);
+  padding: 10px max(20px, calc((100vw - 1440px) / 2 + 24px));
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.firmware-research-notice span {
+  flex: none;
+  color: var(--accent);
+  font-size: 7px;
+  line-height: 18px;
+}
+
+.firmware-research-notice p {
+  margin: 0;
+}
+
 .brand {
   gap: 12px;
 }
@@ -2507,6 +2530,10 @@ footer {
 
   .brand small {
     display: none;
+  }
+
+  .firmware-research-notice {
+    padding: 9px 14px;
   }
 
   .studio-main {

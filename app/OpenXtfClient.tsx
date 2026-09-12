@@ -907,6 +907,11 @@ export default function OpenXtfClient() {
         </nav>
       </header>
 
+      <div className="firmware-research-notice">
+        <span aria-hidden="true">●</span>
+        <p>{copy.firmwareResearchNotice}</p>
+      </div>
+
       <main id="workspace" className="studio-main">
         <div className="studio-grid">
           <aside className="studio-inspector min-w-0">

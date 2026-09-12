@@ -11,6 +11,8 @@ export const TRANSLATIONS = {
     switchToLight: '라이트 모드로 전환',
     switchToDark: '다크 모드로 전환',
     brandSubtitle: '기기를 위한 활자 공방',
+    firmwareResearchNotice:
+      'Xteink 기본 펌웨어 디컴파일 작업은 현재 진행 중입니다. 아직 결과가 완벽하지 않을 수 있습니다. 기다려 주셔서 감사합니다.',
     mainFont: '글꼴 소스',
     pickFont: '글꼴 선택…',
     local: '로컬',
@@ -453,6 +455,8 @@ export const TRANSLATIONS = {
     switchToLight: 'Switch to light mode',
     switchToDark: 'Switch to dark mode',
     brandSubtitle: 'Type workshop for devices',
+    firmwareResearchNotice:
+      'The decompilation of the stock Xteink firmware is ongoing. Results may not be perfect yet. Thank you for your patience.',
     mainFont: 'Font source',
     pickFont: 'Pick a font…',
     local: 'Local',
