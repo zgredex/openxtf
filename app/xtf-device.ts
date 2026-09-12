@@ -615,14 +615,14 @@ export function renderXtfDevicePreview(
     });
   }
 
-  const visiblePlannedLines = selectFirmwarePageLines(
+  const pageFit = selectFirmwarePageLines(
     plannedLines,
     layout.lineSpacing,
     initialLineAdvance,
     firmwareParagraphRatio,
     maximumWholeLines,
-    effectiveBaseAdvanceY,
   );
+  const visiblePlannedLines = pageFit.lines;
   const paragraphBoundaryCount = countFirmwareParagraphBoundaries(
     visiblePlannedLines,
   );
@@ -1016,6 +1016,10 @@ export function renderXtfDevicePreview(
         weightedIntervals,
         normalBoundaryCount,
         paragraphBoundaryCount,
+        pageFitMode: pageFit.mode,
+        pageFitBudget: pageFit.budget,
+        pageFitLimit: pageFit.limit,
+        recordsRemovedByPageFit: pageFit.removed,
         blankLineRecords: visiblePlannedLines.filter(
           (line) => line.glyphs.length === 0,
         ).length,
@@ -1798,32 +1802,60 @@ function selectFirmwarePageLines(
   initialLineAdvance: number,
   paragraphRatio: number,
   maximumLines: number,
-  effectiveBaseAdvanceY: number,
 ) {
   const selected = lines.slice(0, Math.max(1, maximumLines));
-  if (lineSpacing === 'auto') return selected;
-
-  // The manual painter can consume additional height at explicit paragraph
-  // transitions. Apply its exact f32 transition and capacity test rather than
-  // showing records below the firmware's lower reserve.
+  // ProcessEpubContentV6315 keeps a separate binary32 vertical budget after
+  // the row-count cap from InitializeXtfReaderLayoutV6315. FUN_4204d442 uses
+  // transition accounting for every manual choice and for Auto whenever the
+  // paragraph ratio is > 1.0. Auto + 1x takes the record-step branch instead.
+  const transitionStepMode =
+    lineSpacing !== 'auto' || Math.fround(paragraphRatio) > Math.fround(1);
   const fitted: PlannedLine[] = [];
-  let y = Math.fround(V6315_FIRST_LINE_Y);
-  const limit = Math.fround(
-    Math.fround(V6315_SCREEN_HEIGHT - V6315_MANUAL_BOTTOM_RESERVE) +
-      V6315_DRAW_ROUNDING_BIAS,
+  let budget = Math.fround(0);
+  const availableBudget = Math.fround(
+    V6315_SCREEN_HEIGHT -
+      V6315_MANUAL_BOTTOM_RESERVE -
+      V6315_FIRST_LINE_Y,
   );
-  for (const line of selected) {
-    if (fitted.length) {
-      const previous = fitted[fitted.length - 1];
-      const advance = isFirmwareParagraphBoundary(previous, line)
-        ? Math.fround(initialLineAdvance * Math.fround(paragraphRatio))
-        : initialLineAdvance;
-      y = Math.fround(y + advance);
+  // FUN_42094f8e compares firstY + budget against (screenH - 17) - 0.5f.
+  // This is one pixel stricter than the separate +0.5f gap-budget check.
+  const limit = Math.fround(availableBudget - Math.fround(0.5));
+  const gapLimit = Math.fround(availableBudget + Math.fround(0.5));
+  for (let index = 0; index < selected.length; index += 1) {
+    const line = selected[index];
+    let nextBudget = budget;
+    if (transitionStepMode) {
+      if (fitted.length) {
+        const previous = fitted[fitted.length - 1];
+        const advance = isFirmwareParagraphBoundary(previous, line)
+          ? Math.fround(initialLineAdvance * Math.fround(paragraphRatio))
+          : initialLineAdvance;
+        nextBudget = Math.fround(budget + advance);
+      }
+    } else {
+      // The no-height-budget branch advances once for each committed record,
+      // including the first. On overflow FUN_420e1840 rolls that record back.
+      nextBudget = Math.fround(budget + initialLineAdvance);
     }
-    if (Math.fround(y + Math.fround(effectiveBaseAdvanceY)) > limit) break;
+    if (nextBudget > gapLimit || nextBudget > limit) break;
     fitted.push(line);
+    budget = nextBudget;
   }
-  return fitted.length ? fitted : selected.slice(0, 1);
+  if (!fitted.length && selected.length) {
+    // The initialized layout always admits the first ordinary text record;
+    // retain that invariant for malformed/extreme custom header values.
+    fitted.push(selected[0]);
+    budget = transitionStepMode ? Math.fround(0) : initialLineAdvance;
+  }
+  return {
+    lines: fitted,
+    mode: transitionStepMode
+      ? ('transition-step' as const)
+      : ('record-step' as const),
+    budget,
+    limit,
+    removed: selected.length - fitted.length,
+  };
 }
 
 function isFirmwareParagraphBoundary(

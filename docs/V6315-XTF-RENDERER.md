@@ -184,9 +184,22 @@ The subtraction comes from `FUN_4204d42c(4)`. With `advanceY=38` this gives
 This initial step/capacity determines which visual-line records belong to the
 page; it is not necessarily their final painted separation.
 
+`ProcessEpubContentV6315` then applies a second binary32 height budget while it
+commits records. `FUN_4204d442` selects transition accounting for every manual
+spacing choice and for Auto when the paragraph ratio is greater than 1.0. In
+that branch the first text record costs no transition; each following record
+adds either `initialLineStep` or `initialLineStep * paragraphRatioLS`, according
+to whether the preceding nonempty record has a real paragraph-ending LF. Auto
+with a 1× paragraph ratio takes the other branch and adds one initial line step
+per committed record. The lower-origin test is `FUN_42094f8e`; when a committed
+record crosses it, `FUN_420e1840` removes that record and restores its source
+position. Therefore the nominal row cap is not always the number of records
+that reaches the painter, particularly on pages with paragraph transitions.
+OpenXTF applies this fit pass before the final Auto redistribution below.
+
 ### Stage 2: painting the selected page
 
-For a text-only page with at least two records, `FUN_420dcddc` counts explicit
+For the fitted text-only page with at least two records, `FUN_420dcddc` counts explicit
 paragraph boundaries using `FUN_4205702c`/`FUN_420570dc`, then calculates:
 
 ```text
@@ -326,13 +339,34 @@ container set. Images are handled by a separate non-text token path; they must
 not be approximated as ordinary styled text.
 
 That separation is explicit in `FUN_420d866e`: tokenizer token type 5 sets
-result byte `+4` and returns without appending a text record. The page caller
-at `0x420f028e` includes that byte in its nonordinary-result condition.
-OpenXTF is an XTF font builder, not an EPUB image renderer, so it must never
-turn `alt` text into XTF glyphs or invent a CSS-sized blank line. The exact
-downstream geometry consequence of result byte `+4` is not yet claimed here;
-until that consumer is closed, framebuffer parity is explicitly limited to
-text-only Korean/Latin pages.
+result byte `+4` and returns without appending ordinary text. The actual page
+builder is `ProcessEpubContentV6315` at ELF `0x420ee200`; it consumes an image
+tag in a separate branch instead of asking the text-fit helper to treat the
+result byte as a line.
+
+The image branch recognizes `src`, `xlink:href`, and `href`, resolves the EPUB
+archive path, reads the source dimensions, scales down while preserving aspect
+ratio, and creates a special page record. `FUN_420942d2` serializes that record
+as byte `0x04`, an optional `F,` marker, the decimal selected height, `|`, and
+the resolved path. `FUN_42073b4c` recognizes it and `FUN_420943b4` recovers its
+height. `PaintPageTextV6315` then excludes those heights from the ordinary
+text-only Auto denominator, calculates their Y positions through
+`FUN_42054d8a`, centers the decoded image when its width is smaller than the
+available span, and draws it through `FUN_4207c836`. The surrounding state
+machine has distinct `img_before_*`, `img_bottom`, and `img_after_*` fit exits,
+so an image changes pagination even though it is not a text line.
+
+`ReadXtgImageDimensionsV6315` at ELF `0x420e0f5e` reads native XTG dimensions.
+`FUN_420e1152` handles cached dimensions plus JPEG, BMP, and PNG headers.
+`FUN_42052456` performs the aspect-preserving downscale. The old label that
+described `0x420e0f5e` as an EPUB composition state machine was wrong and has
+been removed from the authoritative Ghidra program.
+
+OpenXTF must never turn image `alt` text into XTF glyphs or invent a CSS-sized
+blank line. Exact image-record placement and the image decoder's logical
+framebuffer output are still an open implementation item; until that consumer
+is closed, framebuffer parity is explicitly limited to text-only Korean/Latin
+pages.
 
 The parser is not a general CSS engine. `FUN_4206ec7e` inspects only the
 literal `class` attribute and recognizes this exact keyword set:
@@ -915,10 +949,12 @@ placement pass. They expose:
 
 The preview is not considered closed or 1:1 while any active EPUB-composer
 branch remains approximated. The remaining implementation audit is maintained
-against `FUN_420d7794`, `FUN_420d866e`, `FUN_420d9e84`, and
-`FUN_420de492`, including the complete mixed-script boundary and
-dictionary-hyphenation helper graph. Device photographs may expose an
-unmodeled branch, but similarity to a photo is never a success condition.
+against `ProcessEpubContentV6315` (`0x420ee200`), `BuildPageV6315`,
+`ComposePageRecordsV6315`, `PaintPageTextV6315`, and the image-placement and
+dictionary-hyphenation helper graphs. `FUN_420de492` is retained only as the
+separate direct-stream reader; it is not the EPUB page builder. Device
+photographs may expose an unmodeled branch, but similarity to a photo is never
+a success condition.
 Closure requires a matching firmware trace and a reproducible pre-panel
 framebuffer result for every active branch.
 

@@ -1913,6 +1913,15 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
+                        <dt>{copy.diagnosticPageFitBudget}</dt>
+                        <dd>
+                          {diagnosticLayout?.pageFitBudget !== undefined &&
+                          diagnosticLayout.pageFitLimit !== undefined
+                            ? `${formatFirmwareNumber(diagnosticLayout.pageFitBudget, language)} / ${formatFirmwareNumber(diagnosticLayout.pageFitLimit, language)} px · ${diagnosticLayout.pageFitMode ?? '—'} · −${diagnosticLayout.recordsRemovedByPageFit ?? 0}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
                         <dt>{copy.diagnosticAutoIntervals}</dt>
                         <dd>
                           {diagnosticLayout?.autoDistributed &&

@@ -220,6 +220,10 @@ export type FontPreviewResult = {
       weightedIntervals?: number;
       normalBoundaryCount?: number;
       paragraphBoundaryCount?: number;
+      pageFitMode?: 'record-step' | 'transition-step';
+      pageFitBudget?: number;
+      pageFitLimit?: number;
+      recordsRemovedByPageFit?: number;
       blankLineRecords?: number;
       indentChars?: 1 | 2;
       cjkIndentPixels?: number;
