@@ -1286,6 +1286,8 @@ async function decodeBrowserImageLevels(
   width: number,
   height: number,
 ) {
+  const xtgLevels = decodePlainXtgLevels(bytes, width, height);
+  if (xtgLevels) return xtgLevels;
   if (typeof createImageBitmap !== 'function') return null;
   let bitmap: ImageBitmap | null = null;
   try {
@@ -1327,6 +1329,56 @@ async function decodeBrowserImageLevels(
   } finally {
     bitmap?.close();
   }
+}
+
+export function decodePlainXtgLevels(
+  bytes: Uint8Array,
+  expectedWidth?: number,
+  expectedHeight?: number,
+) {
+  // FUN_42084d72 writes this plain cache form and FUN_4205e08c /
+  // FUN_42055f5c validate and paint it. Expanded XTG has an extra marker and
+  // is intentionally rejected until its payload consumer is closed.
+  if (
+    bytes.length < 22 ||
+    bytes[0] !== 0x58 ||
+    bytes[1] !== 0x54 ||
+    bytes[2] !== 0x47 ||
+    bytes[3] !== 0x00
+  ) {
+    return null;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint16(4, true);
+  const height = view.getUint16(6, true);
+  if (
+    width < 1 ||
+    height < 1 ||
+    (expectedWidth !== undefined && width !== expectedWidth) ||
+    (expectedHeight !== undefined && height !== expectedHeight)
+  ) {
+    return null;
+  }
+  const rowBytes = Math.trunc((width + 7) / 8);
+  const expectedPayloadLength = rowBytes * height;
+  const payloadLength = view.getUint32(10, true);
+  if (
+    payloadLength !== expectedPayloadLength ||
+    bytes.length < 22 + expectedPayloadLength
+  ) {
+    return null;
+  }
+
+  const levels = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const rowOffset = 22 + y * rowBytes;
+    for (let x = 0; x < width; x += 1) {
+      const white =
+        (bytes[rowOffset + (x >> 3)] & (1 << (7 - (x & 7)))) !== 0;
+      levels[y * width + x] = white ? 0 : 3;
+    }
+  }
+  return levels;
 }
 
 function firmwareImageDrawOffset(

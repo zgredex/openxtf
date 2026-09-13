@@ -19,7 +19,11 @@ try {
     logLevel: 'silent',
   });
 
-  const { applyKoreanX4Profile, renderXtfDevicePreview } = await import(
+  const {
+    applyKoreanX4Profile,
+    decodePlainXtgLevels,
+    renderXtfDevicePreview,
+  } = await import(
     pathToFileURL(bundlePath).href
   );
 
@@ -46,6 +50,12 @@ try {
   };
 
   const xtf = makeFixtureXtf();
+  const xtg = makeFixtureXtg();
+  assert.deepEqual(
+    Array.from(decodePlainXtgLevels(xtg, 9, 2)),
+    [0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3],
+  );
+  assert.equal(decodePlainXtgLevels(xtg, 8, 2), null);
   const profiled = applyKoreanX4Profile(
     {
       bytes: xtf,
@@ -325,6 +335,17 @@ try {
   process.stdout.write('V6.3.15 renderer fixtures passed.\n');
 } finally {
   await rm(temporaryDirectory, { recursive: true, force: true });
+}
+
+function makeFixtureXtg() {
+  const bytes = new Uint8Array(22 + 4);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x58, 0x54, 0x47, 0x00], 0);
+  view.setUint16(4, 9, true);
+  view.setUint16(6, 2, true);
+  view.setUint32(10, 4, true);
+  bytes.set([0xaa, 0x80, 0x55, 0x00], 22);
+  return bytes;
 }
 
 function makeFixtureXtf() {

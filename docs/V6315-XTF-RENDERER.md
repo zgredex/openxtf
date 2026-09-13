@@ -26,6 +26,19 @@ mapped constants must select
 accepted as a program selector. A finding is not recorded as verified unless
 its query used that explicit program path.
 
+### Older-firmware research is a hypothesis map
+
+The separate checkout at `/Users/patryk/esp32-reader-re-workflow` (currently
+commit `1bf8af4`) contains extensive X4 V5.6.33 firmware and companion-app
+research. It is useful for suggesting libraries, formats, and call paths to
+look for, but it is not evidence for V6.3.15. In particular, its image-decoder,
+EPUB-style, XTG/XTH, grayscale, and text-layout notes are treated as hypotheses
+until the same behavior is independently recovered from the explicitly
+selected V6.3.15 ELF. A matching library name alone is insufficient: the
+active caller, parameters, constants, output callback, and downstream consumer
+must also agree. Any disagreement remains versioned instead of being resolved
+in favor of the older notes.
+
 ### Raw-payload mapping trap
 
 `/v6315-payload.bin` includes an eight-byte prefix that was imported as if it
@@ -72,8 +85,13 @@ supplied RIDI XTF; the segment rules in `FUN_420db69c` belong to the other
 renderer and must not be copied into the XTF preview.
 
 `FUN_420425b2` verifies the `XTF0` signature and 1/2 bpp format, and
-`FUN_420426f4` activates the specialized engine. `FUN_42078bd0` copies XTF
-header byte `0x0a` (`cellW`) and byte `0x0b` (`cellH`) into its context.
+`FUN_420426f4` activates the specialized engine. The actual 64-byte header
+reader is `FUN_420014b2`, reached through the object loader
+`FUN_420027d2`. It checks `XTF0`, requires header byte `0x06` to be `0x40`,
+and copies header bytes `0x0a`/`0x0b` (`cellW`/`cellH`) and
+`0x0c`/`0x0d` (`advanceY`/`fullWidth`) into the active XTF object. The older
+`FUN_42078bd0` citation was not a function in the selected ELF and has been
+removed.
 
 The activation state is not inferred. `FUN_420426f4` first clears
 `DAT_3fca1fcc`, loads and validates the XTF object at `0x3fc99d0c`, and sets
@@ -388,6 +406,45 @@ content span and `FUN_4207c836` draws it at the requested origin. If no usable
 cache entry is available, the alternate `FUN_4204d5dc` branch draws a clipped
 rectangular placeholder; it does not substitute EPUB `alt` text.
 
+`FUN_420605ae` maps the three source raster extensions used by that worker as
+JPEG (`jpg`/`jpeg`, type 3), BMP (type 2), and PNG (type 10).
+`FUN_420cdf7e` clears the target surface and dispatches those types to
+`FUN_4206b40e`, `FUN_420a8d52`, and `FUN_420cd5c2` respectively. JPEG is fed
+through the current build's TJpgDec-compatible prepare/decompress path, with
+the actual EPUB-cache output callback recovered as
+`JpegOutputCallbackV6315` at `0x403808a4`. PNG uses the current build's
+pngle-compatible streaming path; its setup callback is
+`PngOutputCallbackV6315` at `0x42051780`, which installs one of four recovered
+row callbacks: opaque/unscaled `0x403802de`, opaque/downscaled `0x40380480`,
+alpha/unscaled `0x403805ac`, or alpha/downscaled `0x40380756`. The downscaled
+callbacks map source coordinates with a 16.16 ratio and average every source
+sample that lands on the same output pixel before thresholding. These names
+were added to the selected Ghidra program only after the callback entry points,
+boundaries, and scale-flag direction were recovered.
+
+The three decoders do not hand a four-level image to the EPUB painter. Their
+current-build callbacks reduce source pixels to a one-bit drawing surface.
+RGB is converted with the fixed-point BT.601 expression
+`(77*R + 150*G + 29*B) >> 8`. Before thresholding, values 0...9 are clamped to
+0 and values 246...255 to 255. The ordered threshold is strict and
+position-dependent: a pixel becomes white only when its adjusted luminance is
+greater than `119 + ((x + y) & 15)`. The residual error is propagated to the
+right and the following row by the decoder callbacks. The BMP implementation
+contains the same coefficients, threshold, and two error rows directly.
+Transparent PNG handling has separate callbacks and must be modeled from those
+callbacks rather than browser alpha compositing.
+
+`FUN_42085056` -> `FUN_42084d72` then samples that one-bit surface and writes a
+native XTG cache file. Its header is 22 bytes: `XTG\0`, little-endian width at
+offset 4, height at offset 6, zero format/reserved bytes at 8...9, a
+little-endian payload length at offset 10, and eight reserved bytes at
+14...21 for the normal cache call. The payload is
+`height * ceil(width / 8)` bytes, row-major and MSB-first. A set bit represents
+white; an unset bit represents black. `FUN_4205e08c` validates that header and
+`FUN_42055f5c` consumes the same row geometry when the cached image is painted.
+This disproves OpenXTF's earlier four-level, smoothly scaled browser-image
+approximation for EPUB raster records.
+
 The surrounding state machine has distinct `img_before_*`, `img_bottom`, and
 `img_after_*` fit exits, so an image changes pagination even though it is not a
 text line. Text accumulated before the image is committed first. When text
@@ -402,10 +459,12 @@ been removed from the authoritative Ghidra program.
 
 OpenXTF must never turn image `alt` text into XTF glyphs or invent a CSS-sized
 blank line. Image record construction, page-fit integration, cached-size
-selection, centering, and the independent draw-Y adjustment are now fully
-traced. The format-specific decoder's final logical gray conversion is still
-an open implementation item; until that consumer is closed, framebuffer parity
-is explicitly limited to text-only Korean/Latin pages.
+selection, centering, independent draw-Y adjustment, one-bit cache format, and
+the shared luminance/threshold core are traced. Exact browser parity for raster
+images still requires a faithful implementation of each format's scaling and
+alpha branch plus deterministic decoder fixtures; until that consumer is
+closed, framebuffer parity is explicitly limited to text-only Korean/Latin
+pages and directly decoded plain-XTG image records.
 
 The parser is not a general CSS engine. `FUN_4206ec7e` inspects only the
 literal `class` attribute and recognizes this exact keyword set:
@@ -870,9 +929,10 @@ clipping, and pixels occupied by glyphs from different lines separately.
 
 ## What an XTF file can influence
 
-`FUN_420426f4`/`FUN_42078bd0` copy only a subset of the v2 XTF header into the
-active renderer. The distinction below is important: a field can be valid XTF
-metadata without being consulted by this reading path.
+`FUN_420014b2`/`FUN_420027d2` load the v2 XTF header into the active object,
+while the renderer consumes only a subset of those values. The distinction
+below is important: a field can be valid XTF metadata without being consulted
+by this reading path.
 
 | XTF data | Stock V6.3.15 reading effect |
 | --- | --- |

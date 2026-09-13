@@ -795,6 +795,21 @@ function inferImageMediaType(path: string) {
 }
 
 function readRasterImageDimensions(bytes: Uint8Array) {
+  // ReadXtgImageDimensionsV6315 (ELF 0x420e0f5e) checks the first eight
+  // bytes only: `XTG\0`, then little-endian u16 width and height.
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x58 &&
+    bytes[1] === 0x54 &&
+    bytes[2] === 0x47 &&
+    bytes[3] === 0x00
+  ) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint16(4, true);
+    const height = view.getUint16(6, true);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
   if (
     bytes.length >= 24 &&
     bytes[0] === 0x89 &&
