@@ -4,6 +4,7 @@ import type {
   FontWorkerError,
 } from './font-worker';
 import { firmwareHyphenationPoints } from './v6315-hyphenation';
+import { decodeV6315JpegGrayscale } from './v6315-jpeg';
 
 export type TypographyProfile = 'korean-x4' | 'standard';
 
@@ -255,8 +256,17 @@ type PlannedImage = {
   sourceHeight: number;
   width: number;
   height: number;
+  decodedWidth: number;
+  decodedHeight: number;
+  ditherPhaseStart?: number;
+  ditherPhaseEnd?: number;
   levels: Uint8Array | null;
-  rasterModel: 'xtg-exact' | 'png-v6315' | 'bmp-v6315' | 'jpeg-browser';
+  rasterModel:
+    | 'xtg-exact'
+    | 'png-v6315'
+    | 'bmp-v6315'
+    | 'jpeg-v6315'
+    | 'jpeg-browser';
   placeholder: boolean;
   lastConsumedSourceIndex: number;
 };
@@ -515,6 +525,7 @@ export async function renderXtfDevicePreview(
   const previewBlocks = normalizePreviewBlocks(text, options.blocks);
   const sourceCharacters: string[] = [];
   const plannedRecords: PlannedRecord[] = [];
+  const jpegDitherState = { phase: 0 };
   let sourceIndex = 0;
   for (let paragraphIndex = 0; paragraphIndex < previewBlocks.length; paragraphIndex += 1) {
     const block = previewBlocks[paragraphIndex];
@@ -525,6 +536,7 @@ export async function renderXtfDevicePreview(
           paragraphIndex,
           contentWidth,
           initialLineAdvance,
+          jpegDitherState,
         ),
       );
       continue;
@@ -751,6 +763,10 @@ export async function renderXtfDevicePreview(
         y: drawY,
         width: record.width,
         height: record.height,
+        decodedWidth: record.decodedWidth,
+        decodedHeight: record.decodedHeight,
+        ditherPhaseStart: record.ditherPhaseStart,
+        ditherPhaseEnd: record.ditherPhaseEnd,
         drawOffsetY,
         rasterModel: record.rasterModel,
         placeholder: record.placeholder,
@@ -1175,6 +1191,7 @@ async function prepareFirmwareImageRecord(
   paragraphIndex: number,
   contentWidth: number,
   lineStep: number,
+  jpegDitherState: { phase: number },
 ): Promise<PlannedImage> {
   const defaultHeight = firmwareDefaultImageHeight(lineStep);
   const imageType = firmwareRasterImageType(image.bytes, image.mediaType);
@@ -1192,6 +1209,10 @@ async function prepareFirmwareImageRecord(
         defaultHeight,
       );
   let levels: Uint8Array | null = null;
+  let decodedWidth = 0;
+  let decodedHeight = 0;
+  let ditherPhaseStart: number | undefined;
+  let ditherPhaseEnd: number | undefined;
   let rasterModel: PlannedImage['rasterModel'] = 'jpeg-browser';
   if (scaled && image.bytes.length) {
     const decoded = await decodeBrowserImageLevels(
@@ -1203,9 +1224,16 @@ async function prepareFirmwareImageRecord(
       defaultHeight,
       scaled.width,
       scaled.height,
+      jpegDitherState,
     );
     levels = decoded?.levels ?? null;
-    if (decoded) rasterModel = decoded.rasterModel;
+    if (decoded) {
+      rasterModel = decoded.rasterModel;
+      decodedWidth = decoded.decodedWidth;
+      decodedHeight = decoded.decodedHeight;
+      ditherPhaseStart = decoded.ditherPhaseStart;
+      ditherPhaseEnd = decoded.ditherPhaseEnd;
+    }
   }
   const height = scaled?.height ?? defaultHeight;
   const placeholder = levels === null;
@@ -1220,6 +1248,10 @@ async function prepareFirmwareImageRecord(
     sourceHeight: image.height,
     width,
     height,
+    decodedWidth,
+    decodedHeight,
+    ditherPhaseStart,
+    ditherPhaseEnd,
     levels,
     rasterModel,
     placeholder,
@@ -1321,6 +1353,15 @@ function firmwarePlaceholderImageWidth(
     : contentWidth;
 }
 
+type DecodedFirmwareImage = {
+  levels: Uint8Array;
+  rasterModel: PlannedImage['rasterModel'];
+  decodedWidth: number;
+  decodedHeight: number;
+  ditherPhaseStart?: number;
+  ditherPhaseEnd?: number;
+};
+
 async function decodeBrowserImageLevels(
   bytes: Uint8Array,
   mediaType: string,
@@ -1330,13 +1371,73 @@ async function decodeBrowserImageLevels(
   maximumHeight: number,
   width: number,
   height: number,
-) {
+  jpegDitherState: { phase: number },
+): Promise<DecodedFirmwareImage | null> {
   const xtgLevels = decodePlainXtgLevels(bytes, width, height);
   if (xtgLevels) {
-    return { levels: xtgLevels, rasterModel: 'xtg-exact' as const };
+    return {
+      levels: xtgLevels,
+      rasterModel: 'xtg-exact' as const,
+      decodedWidth: width,
+      decodedHeight: height,
+    };
   }
   const type = firmwareRasterImageType(bytes, mediaType);
   if (type === 'unknown' || type === 'xtg') return null;
+  if (type === 'jpeg') {
+    try {
+      const fitByWidth =
+        Math.fround(maximumWidth / sourceWidth) <=
+        Math.fround(maximumHeight / sourceHeight);
+      const decoded = await decodeV6315JpegGrayscale(
+        bytes,
+        width,
+        height,
+        fitByWidth,
+      );
+      if (decoded) {
+        const ditherPhaseStart = jpegDitherState.phase;
+        const tightLuminance = new Uint8Array(decoded.width * decoded.height);
+        for (let y = 0; y < decoded.height; y += 1) {
+          tightLuminance.set(
+            decoded.luminance.subarray(
+              y * width,
+              y * width + decoded.width,
+            ),
+            y * decoded.width,
+          );
+        }
+        const dithered = ditherFirmwareJpegOneBit(
+          tightLuminance,
+          decoded.width,
+          decoded.height,
+          jpegDitherState.phase,
+        );
+        jpegDitherState.phase = dithered.finalPhase;
+        const levels = new Uint8Array(width * height);
+        for (let y = 0; y < decoded.height; y += 1) {
+          levels.set(
+            dithered.levels.subarray(
+              y * decoded.width,
+              (y + 1) * decoded.width,
+            ),
+            y * width,
+          );
+        }
+        return {
+          levels,
+          rasterModel: 'jpeg-v6315' as const,
+          decodedWidth: decoded.width,
+          decodedHeight: decoded.height,
+          ditherPhaseStart,
+          ditherPhaseEnd: dithered.finalPhase,
+        };
+      }
+    } catch {
+      // A browser without WebAssembly or a failed asset request falls through
+      // to the explicitly labelled browser JPEG approximation below.
+    }
+  }
   if (typeof createImageBitmap !== 'function') return null;
   let bitmap: ImageBitmap | null = null;
   try {
@@ -1366,7 +1467,14 @@ async function decodeBrowserImageLevels(
         width,
         height,
       );
-      return levels ? { levels, rasterModel: 'png-v6315' as const } : null;
+      return levels
+        ? {
+            levels,
+            rasterModel: 'png-v6315' as const,
+            decodedWidth: width,
+            decodedHeight: height,
+          }
+        : null;
     }
     if (type === 'bmp') {
       return {
@@ -1380,17 +1488,32 @@ async function decodeBrowserImageLevels(
           height,
         ),
         rasterModel: 'bmp-v6315' as const,
+        decodedWidth: width,
+        decodedHeight: height,
       };
     }
+    const ditherPhaseStart = jpegDitherState.phase;
+    const luminance = decodeFirmwareJpegModelLuminance(
+      rgba,
+      sourceWidth,
+      sourceHeight,
+      width,
+      height,
+    );
+    const dithered = ditherFirmwareJpegOneBit(
+      luminance,
+      width,
+      height,
+      ditherPhaseStart,
+    );
+    jpegDitherState.phase = dithered.finalPhase;
     return {
-      levels: decodeFirmwareJpegModelLevels(
-        rgba,
-        sourceWidth,
-        sourceHeight,
-        width,
-        height,
-      ),
+      levels: dithered.levels,
       rasterModel: 'jpeg-browser' as const,
+      decodedWidth: width,
+      decodedHeight: height,
+      ditherPhaseStart,
+      ditherPhaseEnd: dithered.finalPhase,
     };
   } catch {
     return null;
@@ -1566,16 +1689,16 @@ function decodeFirmwareBmpLevels(
   );
 }
 
-function decodeFirmwareJpegModelLevels(
+function decodeFirmwareJpegModelLuminance(
   rgba: Uint8ClampedArray,
   sourceWidth: number,
   sourceHeight: number,
   width: number,
   height: number,
 ) {
-  // The one-bit callback and its fresh-state phase are exact. Browser JPEG
-  // decoding cannot reproduce TJpgDec's reduced-IDCT samples byte-for-byte,
-  // so scaled JPEGs remain explicitly outside the parity claim.
+  // Fallback only: the exact path above uses the V6.3.15-matched TJpgDec
+  // module. If WebAssembly is unavailable, browser RGBA remains explicitly
+  // labelled because it cannot reproduce reduced-IDCT samples byte-for-byte.
   const luminance = new Uint8Array(width * height);
   for (let y = 0; y < height; y += 1) {
     const sourceY = Math.min(
@@ -1593,7 +1716,7 @@ function decodeFirmwareJpegModelLevels(
       );
     }
   }
-  return ditherFirmwareOneBit(luminance, width, height, 'linear', 0, 0);
+  return luminance;
 }
 
 export function ditherFirmwareOneBit(
@@ -1640,6 +1763,57 @@ export function ditherFirmwareOneBit(
     nextErrors.fill(0);
   }
   return levels;
+}
+
+export function ditherFirmwareJpegOneBit(
+  luminance: Uint8Array,
+  width: number,
+  height: number,
+  startPhase = 0,
+) {
+  // JpegOutputCallbackV6315 (ELF 0x403808a4) modifies its 8-bit row buffer
+  // immediately. Each propagated error is saturated to 0...255 before a later
+  // neighbor is added, unlike the PNG/BMP signed-row-buffer implementation.
+  const working = luminance.slice();
+  const levels = new Uint8Array(width * height);
+  let phase = startPhase & 0xff;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      let adjusted = working[index];
+      if (adjusted < 10) adjusted = 0;
+      else if (adjusted > 245) adjusted = 255;
+      const white = adjusted > 119 + ((phase + x) & 15);
+      working[index] = white ? 255 : 0;
+      levels[index] = white ? 0 : 3;
+      const error = toFirmwareInt16(adjusted - (white ? 255 : 0));
+      if (error === 0) continue;
+      const unit = toFirmwareInt16((error - (error >> 3)) >> 2);
+      if (x < width - 1) {
+        working[index + 1] = clampFirmwareByte(
+          working[index + 1] + unit * 2,
+        );
+      }
+      if (y < height - 1) {
+        if (x > 0) {
+          working[index + width - 1] = clampFirmwareByte(
+            working[index + width - 1] + unit,
+          );
+        }
+        working[index + width] = clampFirmwareByte(
+          working[index + width] + unit,
+        );
+      }
+    }
+    phase = (phase + width) & 0xff;
+  }
+  return { levels, finalPhase: phase };
+}
+
+function clampFirmwareByte(value: number) {
+  if (value < 0) return 0;
+  if (value > 255) return 255;
+  return value;
 }
 
 function toFirmwareInt16(value: number) {

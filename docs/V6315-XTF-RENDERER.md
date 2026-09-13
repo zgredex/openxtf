@@ -409,9 +409,28 @@ rectangular placeholder; it does not substitute EPUB `alt` text.
 `FUN_420605ae` maps the three source raster extensions used by that worker as
 JPEG (`jpg`/`jpeg`, type 3), BMP (type 2), and PNG (type 10).
 `FUN_420cdf7e` clears the target surface and dispatches those types to
-`FUN_4206b40e`, `FUN_420a8d52`, and `FUN_420cd5c2` respectively. JPEG is fed
-through the current build's TJpgDec-compatible prepare/decompress path, with
-the actual EPUB-cache output callback recovered as
+`FUN_4206b40e`, `FUN_420a8d52`, and `FUN_420cd5c2` respectively. JPEG reaches
+`FUN_4201d040` (prepare) and `FUN_4201d500` (decompress). Those functions are a
+source-level structural match for ChaN TJpgDec R0.03 with a 512-byte input
+buffer, 3,500-byte work pool, scale support enabled, fast-decode level 1,
+grayscale output, and the 1,024-byte saturation table enabled. The current
+binary contains one visible grayscale modification: non-1/8 IDCT Y samples are
+saturated through the table at `0x3c269df4` before scale averaging rather than
+being narrowed directly to eight bits. At 1/8 scale the decoder uses each
+block's DC Y sample directly, as the recovered R0.03 branch does.
+
+`FUN_42069688` does not ask a browser-style image scaler for the final JPEG.
+It selects TJpgDec reduction 1, 2, 4, or 8 from the limiting source/target
+axis, sets that power-of-two scale through `FUN_4201cae4`, and records an
+integer numerator/denominator through `FUN_4201cb9c`. The internal callback
+now named `FirmwareJpegResampleCallbackV6315` at `0x4201c804` maps each decoded
+MCU rectangle separately. Its output rectangle is calculated with integer
+division at both edges, and each output sample selects a source sample with a
+per-rectangle integer accumulator. This can leave a one-pixel white strip even
+when the outer cache dimensions are exact: a 1417×2126 source targeted at
+400×600 produces 399 decoded columns in the 400-column XTG crop.
+
+The actual EPUB-cache one-bit output callback is
 `JpegOutputCallbackV6315` at `0x403808a4`. PNG uses the current build's
 pngle-compatible streaming path; its setup callback is
 `PngOutputCallbackV6315` at `0x42051780`, which installs one of four recovered
@@ -478,13 +497,27 @@ selection, centering, independent draw-Y adjustment, one-bit cache format, and
 the luminance/threshold core are traced. OpenXTF now decodes plain unexpanded
 XTG exactly, models BMP crop geometry, and applies the current PNG fixed-point
 downscale/averaging, white alpha composition, custom error propagation, and
-ordered threshold after the browser returns source RGBA pixels. It labels the
-active image model in diagnostics. Exact browser parity for JPEG remains open:
-TJpgDec's reduced-IDCT samples are not reproduced by the browser decoder and
-the cache output also depends on `DAT_3fca21cc`'s starting phase. Deterministic
-current-build decoder fixtures are still required before extending the parity
-claim beyond text-only Korean/Latin pages and directly decoded plain-XTG image
-records.
+ordered threshold after the browser returns source RGBA pixels. For JPEG it
+loads a 14 KB WebAssembly build from pinned TJpgDec v1.0.8/R0.03 source and
+applies the configuration, grayscale saturation modification, scale selection,
+and per-MCU resampler verified above. `JpegOutputCallbackV6315` uses an
+eight-bit working row: every propagated error is saturated immediately by
+`FUN_420697b4`, so OpenXTF has a separate JPEG dither implementation rather
+than reusing the signed PNG/BMP row-buffer model. A deterministic baseline
+JPEG fixture pins the WebAssembly luminance output.
+
+The JPEG cache remains history-sensitive. `DAT_3fca21cc` is zero-initialized
+but persists across JPEG cache builds, and its final value advances by every
+processed output-row width. OpenXTF starts at the firmware's fresh-boot value
+and carries the phase across JPEG records in preview order. Diagnostics label
+that path as `V6.3.15 decoder / fresh-cache phase`; if an existing device has
+already generated other JPEG caches since boot, its ordered threshold phase
+can differ even though decoded luminance, geometry, resampling, and diffusion
+are the same. The browser JPEG decoder is retained only as an explicitly
+labelled fallback when WebAssembly cannot be loaded. Image diagnostics expose
+the source size, internal decoder output, outer XTG/draw size, and starting and
+ending JPEG phase; the one-column difference in the 1417×2126 example is
+therefore visible instead of being silently hidden by the cache dimensions.
 
 The parser is not a general CSS engine. `FUN_4206ec7e` inspects only the
 literal `class` attribute and recognizes this exact keyword set:

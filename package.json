@@ -10,7 +10,9 @@
     "build": "vinext build",
     "start": "vinext start",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next --ignore-pattern public/assets --ignore-pattern public/vendor",
+    "build:jpeg-decoder": "tools/build-v6315-jpeg-wasm.sh",
     "verify:compatibility": "node tools/verify-compatibility.mjs",
+    "verify:jpeg-decoder": "node tools/verify-v6315-jpeg.mjs",
     "verify:renderer": "node tools/verify-renderer.mjs",
     "deploy:pages": "npm run build && wrangler pages deploy dist/client --project-name openxtf"
   },

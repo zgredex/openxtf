@@ -1,0 +1,12 @@
+The Tiny JPEG Decompressor source used to build the WebAssembly module is
+distributed under the following terms:
+
+TJpgDec - Tiny JPEG Decompressor R0.03 (C)ChaN, 2021
+
+The TJpgDec module is a free software and there is NO WARRANTY. No restriction
+on use. You can use, modify and redistribute it for personal, non-profit or
+commercial products UNDER YOUR RESPONSIBILITY. Redistributions of source code
+must retain the above copyright notice.
+
+Upstream source: https://github.com/Bodmer/TJpg_Decoder
+Pinned version: v1.0.8, commit b764d104fc1c25f9af147c3bcb314cb1adf189dd

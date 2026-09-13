@@ -22,6 +22,7 @@ try {
   const {
     applyKoreanX4Profile,
     decodePlainXtgLevels,
+    ditherFirmwareJpegOneBit,
     ditherFirmwareOneBit,
     renderXtfDevicePreview,
   } = await import(
@@ -65,6 +66,13 @@ try {
     Array.from(ditherFirmwareOneBit(new Uint8Array([120]), 1, 1)),
     [0],
   );
+  const jpegDither = ditherFirmwareJpegOneBit(
+    new Uint8Array([119, 119, 119, 119]),
+    2,
+    2,
+  );
+  assert.deepEqual(Array.from(jpegDither.levels), [3, 0, 0, 3]);
+  assert.equal(jpegDither.finalPhase, 4);
   const profiled = applyKoreanX4Profile(
     {
       bytes: xtf,

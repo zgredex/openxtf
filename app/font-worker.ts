@@ -171,8 +171,17 @@ export type FontPreviewResult = {
       y: number;
       width: number;
       height: number;
+      decodedWidth?: number;
+      decodedHeight?: number;
+      ditherPhaseStart?: number;
+      ditherPhaseEnd?: number;
       drawOffsetY: number;
-      rasterModel?: 'xtg-exact' | 'png-v6315' | 'bmp-v6315' | 'jpeg-browser';
+      rasterModel?:
+        | 'xtg-exact'
+        | 'png-v6315'
+        | 'bmp-v6315'
+        | 'jpeg-v6315'
+        | 'jpeg-browser';
       placeholder: boolean;
       frameClipped: boolean;
     }>;

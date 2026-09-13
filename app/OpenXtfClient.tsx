@@ -2592,10 +2592,12 @@ export default function OpenXtfClient() {
                               <th>#</th>
                               <th>{copy.diagnosticImagePath}</th>
                               <th>{copy.diagnosticSourceSize}</th>
+                              <th>{copy.diagnosticDecodedSize}</th>
                               <th>{copy.diagnosticDrawSize}</th>
                               <th>{copy.diagnosticDrawOrigin}</th>
                               <th>{copy.diagnosticImageOffset}</th>
                               <th>{copy.diagnosticImageMode}</th>
+                              <th>{copy.diagnosticDitherPhase}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -2613,6 +2615,11 @@ export default function OpenXtfClient() {
                                     ? `${image.sourceWidth}×${image.sourceHeight} px`
                                     : '—'}
                                 </td>
+                                <td>
+                                  {image.decodedWidth && image.decodedHeight
+                                    ? `${image.decodedWidth}×${image.decodedHeight} px`
+                                    : '—'}
+                                </td>
                                 <td>{image.width}×{image.height} px</td>
                                 <td>{image.x}, {image.y} px</td>
                                 <td>+{image.drawOffsetY} px</td>
@@ -2625,9 +2632,17 @@ export default function OpenXtfClient() {
                                         ? copy.diagnosticImagePngModel
                                         : image.rasterModel === 'bmp-v6315'
                                           ? copy.diagnosticImageBmpModel
+                                          : image.rasterModel === 'jpeg-v6315'
+                                            ? copy.diagnosticImageJpegExact
                                           : image.rasterModel === 'jpeg-browser'
                                             ? copy.diagnosticImageJpegModel
                                             : copy.diagnosticDecodedImage}
+                                </td>
+                                <td>
+                                  {image.ditherPhaseStart !== undefined &&
+                                  image.ditherPhaseEnd !== undefined
+                                    ? `${image.ditherPhaseStart} → ${image.ditherPhaseEnd}`
+                                    : '—'}
                                 </td>
                               </tr>
                             ))}
