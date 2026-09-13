@@ -256,6 +256,7 @@ type PlannedImage = {
   width: number;
   height: number;
   levels: Uint8Array | null;
+  rasterModel: 'xtg-exact' | 'png-v6315' | 'bmp-v6315' | 'jpeg-browser';
   placeholder: boolean;
   lastConsumedSourceIndex: number;
 };
@@ -751,6 +752,7 @@ export async function renderXtfDevicePreview(
         width: record.width,
         height: record.height,
         drawOffsetY,
+        rasterModel: record.rasterModel,
         placeholder: record.placeholder,
         frameClipped:
           drawX < 0 ||
@@ -1175,20 +1177,35 @@ async function prepareFirmwareImageRecord(
   lineStep: number,
 ): Promise<PlannedImage> {
   const defaultHeight = firmwareDefaultImageHeight(lineStep);
-  const scaled = firmwareScaleImageDimensions(
-    image.width,
-    image.height,
-    contentWidth,
-    defaultHeight,
-  );
+  const imageType = firmwareRasterImageType(image.bytes, image.mediaType);
+  const scaled = imageType === 'bmp'
+    ? firmwareBmpCacheDimensions(
+        image.width,
+        image.height,
+        contentWidth,
+        defaultHeight,
+      )
+    : firmwareScaleImageDimensions(
+        image.width,
+        image.height,
+        contentWidth,
+        defaultHeight,
+      );
   let levels: Uint8Array | null = null;
+  let rasterModel: PlannedImage['rasterModel'] = 'jpeg-browser';
   if (scaled && image.bytes.length) {
-    levels = await decodeBrowserImageLevels(
+    const decoded = await decodeBrowserImageLevels(
       image.bytes,
       image.mediaType,
+      image.width,
+      image.height,
+      contentWidth,
+      defaultHeight,
       scaled.width,
       scaled.height,
     );
+    levels = decoded?.levels ?? null;
+    if (decoded) rasterModel = decoded.rasterModel;
   }
   const height = scaled?.height ?? defaultHeight;
   const placeholder = levels === null;
@@ -1204,6 +1221,7 @@ async function prepareFirmwareImageRecord(
     width,
     height,
     levels,
+    rasterModel,
     placeholder,
     lastConsumedSourceIndex: -1,
   };
@@ -1263,6 +1281,29 @@ function firmwareScaleImageDimensions(
   };
 }
 
+function firmwareBmpCacheDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maximumWidth: number,
+  maximumHeight: number,
+) {
+  // The BMP arm of FUN_420cdf7e does not receive the aspect-fit dimensions.
+  // FUN_420a8d52 centers an undersized bitmap and crops an oversized one;
+  // FUN_420ce0d0 then writes only the intersecting rectangle to XTG.
+  if (
+    sourceWidth < 1 ||
+    sourceHeight < 1 ||
+    maximumWidth < 1 ||
+    maximumHeight < 1
+  ) {
+    return null;
+  }
+  return {
+    width: Math.min(sourceWidth, maximumWidth),
+    height: Math.min(sourceHeight, maximumHeight),
+  };
+}
+
 function firmwareRoundPositive(value: number) {
   return Math.trunc(Math.fround(Math.fround(value) + Math.fround(0.5)));
 }
@@ -1283,11 +1324,19 @@ function firmwarePlaceholderImageWidth(
 async function decodeBrowserImageLevels(
   bytes: Uint8Array,
   mediaType: string,
+  sourceWidth: number,
+  sourceHeight: number,
+  maximumWidth: number,
+  maximumHeight: number,
   width: number,
   height: number,
 ) {
   const xtgLevels = decodePlainXtgLevels(bytes, width, height);
-  if (xtgLevels) return xtgLevels;
+  if (xtgLevels) {
+    return { levels: xtgLevels, rasterModel: 'xtg-exact' as const };
+  }
+  const type = firmwareRasterImageType(bytes, mediaType);
+  if (type === 'unknown' || type === 'xtg') return null;
   if (typeof createImageBitmap !== 'function') return null;
   let bitmap: ImageBitmap | null = null;
   try {
@@ -1297,38 +1346,304 @@ async function decodeBrowserImageLevels(
       }),
     );
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = sourceWidth;
+    canvas.height = sourceHeight;
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) return null;
-    context.clearRect(0, 0, width, height);
+    context.clearRect(0, 0, sourceWidth, sourceHeight);
     context.fillStyle = '#fff';
-    context.fillRect(0, 0, width, height);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
-    context.drawImage(bitmap, 0, 0, width, height);
-    const rgba = context.getImageData(0, 0, width, height).data;
-    const levels = new Uint8Array(width * height);
-    for (let index = 0; index < levels.length; index += 1) {
-      const offset = index * 4;
-      const alpha = rgba[offset + 3];
-      const red = 255 - Math.round(((255 - rgba[offset]) * alpha) / 255);
-      const green = 255 - Math.round(((255 - rgba[offset + 1]) * alpha) / 255);
-      const blue = 255 - Math.round(((255 - rgba[offset + 2]) * alpha) / 255);
-      const luminance = Math.round(
-        (red * 299 + green * 587 + blue * 114) / 1000,
+    context.fillRect(0, 0, sourceWidth, sourceHeight);
+    context.imageSmoothingEnabled = false;
+    context.drawImage(bitmap, 0, 0, sourceWidth, sourceHeight);
+    const rgba = context.getImageData(0, 0, sourceWidth, sourceHeight).data;
+    if (type === 'png') {
+      const levels = decodeFirmwarePngLevels(
+        rgba,
+        sourceWidth,
+        sourceHeight,
+        maximumWidth,
+        maximumHeight,
+        width,
+        height,
       );
-      levels[index] = Math.max(
-        0,
-        Math.min(3, Math.round(((255 - luminance) * 3) / 255)),
-      );
+      return levels ? { levels, rasterModel: 'png-v6315' as const } : null;
     }
-    return levels;
+    if (type === 'bmp') {
+      return {
+        levels: decodeFirmwareBmpLevels(
+          rgba,
+          sourceWidth,
+          sourceHeight,
+          maximumWidth,
+          maximumHeight,
+          width,
+          height,
+        ),
+        rasterModel: 'bmp-v6315' as const,
+      };
+    }
+    return {
+      levels: decodeFirmwareJpegModelLevels(
+        rgba,
+        sourceWidth,
+        sourceHeight,
+        width,
+        height,
+      ),
+      rasterModel: 'jpeg-browser' as const,
+    };
   } catch {
     return null;
   } finally {
     bitmap?.close();
   }
+}
+
+type FirmwareRasterImageType = 'xtg' | 'png' | 'bmp' | 'jpeg' | 'unknown';
+
+function firmwareRasterImageType(
+  bytes: Uint8Array,
+  mediaType: string,
+): FirmwareRasterImageType {
+  if (
+    bytes.length >= 4 &&
+    bytes[0] === 0x58 &&
+    bytes[1] === 0x54 &&
+    bytes[2] === 0x47 &&
+    bytes[3] === 0x00
+  ) return 'xtg';
+  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return 'bmp';
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return 'jpeg';
+  if (/png/i.test(mediaType)) return 'png';
+  if (/bmp/i.test(mediaType)) return 'bmp';
+  if (/jpe?g/i.test(mediaType)) return 'jpeg';
+  if (/xtg/i.test(mediaType)) return 'xtg';
+  return 'unknown';
+}
+
+function firmwarePngLuminance(
+  rgba: Uint8ClampedArray,
+  pixelIndex: number,
+) {
+  const offset = pixelIndex * 4;
+  const alpha = rgba[offset + 3];
+  let red = rgba[offset];
+  let green = rgba[offset + 1];
+  let blue = rgba[offset + 2];
+  // The active EPUB call disables alpha skipping and selects the
+  // FUN_42053846 white-background blend.
+  if (alpha !== 255) {
+    const white = (255 - alpha) * 255;
+    red = (red * alpha + white) >> 8;
+    green = (green * alpha + white) >> 8;
+    blue = (blue * alpha + white) >> 8;
+  }
+  return (red * 0x4d + green * 0x96 + blue * 0x1d) >> 8;
+}
+
+function firmwareOpaqueLuminance(
+  rgba: Uint8ClampedArray,
+  pixelIndex: number,
+) {
+  const offset = pixelIndex * 4;
+  return (
+    (rgba[offset] * 0x4d +
+      rgba[offset + 1] * 0x96 +
+      rgba[offset + 2] * 0x1d) >>
+    8
+  );
+}
+
+function decodeFirmwarePngLevels(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  maximumWidth: number,
+  maximumHeight: number,
+  cacheWidth: number,
+  cacheHeight: number,
+) {
+  const widthRatio = Math.trunc((maximumWidth * 0x10000) / sourceWidth);
+  const heightRatio = Math.trunc((maximumHeight * 0x10000) / sourceHeight);
+  let ratio = Math.min(widthRatio, heightRatio);
+  if (ratio >= 0xfffa) ratio = 0x10000;
+  const drawWidth = Math.min(
+    cacheWidth,
+    Math.trunc((sourceWidth * ratio) / 0x10000),
+  );
+  const drawHeight = Math.min(
+    cacheHeight,
+    Math.trunc((sourceHeight * ratio) / 0x10000),
+  );
+  if (drawWidth < 1 || drawHeight < 1) return null;
+
+  const sums = new Uint32Array(drawWidth * drawHeight);
+  const counts = new Uint32Array(drawWidth * drawHeight);
+  for (let sourceY = 0; sourceY < sourceHeight; sourceY += 1) {
+    const targetY = Math.trunc((sourceY * ratio) / 0x10000);
+    if (targetY >= drawHeight) continue;
+    for (let sourceX = 0; sourceX < sourceWidth; sourceX += 1) {
+      const targetX = Math.trunc((sourceX * ratio) / 0x10000);
+      if (targetX >= drawWidth) continue;
+      const targetIndex = targetY * drawWidth + targetX;
+      sums[targetIndex] += firmwarePngLuminance(
+        rgba,
+        sourceY * sourceWidth + sourceX,
+      );
+      counts[targetIndex] += 1;
+    }
+  }
+  const luminance = new Uint8Array(drawWidth * drawHeight);
+  for (let index = 0; index < luminance.length; index += 1) {
+    const count = counts[index];
+    if (!count) {
+      luminance[index] = 255;
+      continue;
+    }
+    const reciprocal = Math.trunc((0x10000 + (count >> 1)) / count);
+    luminance[index] = Math.min(255, (sums[index] * reciprocal) >> 16);
+  }
+
+  const drawOriginX = Math.trunc((maximumWidth - drawWidth) / 2);
+  const drawOriginY = Math.trunc((maximumHeight - drawHeight) / 2);
+  const cacheOriginX = Math.trunc((maximumWidth - cacheWidth) / 2);
+  const cacheOriginY = Math.trunc((maximumHeight - cacheHeight) / 2);
+  const offsetX = drawOriginX - cacheOriginX;
+  const offsetY = drawOriginY - cacheOriginY;
+  const dithered = ditherFirmwareOneBit(
+    luminance,
+    drawWidth,
+    drawHeight,
+    'xy',
+    drawOriginX,
+    drawOriginY,
+  );
+  const levels = new Uint8Array(cacheWidth * cacheHeight);
+  for (let y = 0; y < drawHeight; y += 1) {
+    const targetY = y + offsetY;
+    if (targetY < 0 || targetY >= cacheHeight) continue;
+    for (let x = 0; x < drawWidth; x += 1) {
+      const targetX = x + offsetX;
+      if (targetX < 0 || targetX >= cacheWidth) continue;
+      levels[targetY * cacheWidth + targetX] = dithered[y * drawWidth + x];
+    }
+  }
+  return levels;
+}
+
+function decodeFirmwareBmpLevels(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  maximumWidth: number,
+  maximumHeight: number,
+  cacheWidth: number,
+  cacheHeight: number,
+) {
+  const luminance = new Uint8Array(cacheWidth * cacheHeight);
+  for (let y = 0; y < cacheHeight; y += 1) {
+    for (let x = 0; x < cacheWidth; x += 1) {
+      luminance[y * cacheWidth + x] = firmwareOpaqueLuminance(
+        rgba,
+        y * sourceWidth + x,
+      );
+    }
+  }
+  const originX = sourceWidth <= maximumWidth
+    ? Math.trunc((maximumWidth - sourceWidth) / 2)
+    : 0;
+  const originY = sourceHeight <= maximumHeight
+    ? Math.trunc((maximumHeight - sourceHeight) / 2)
+    : 0;
+  return ditherFirmwareOneBit(
+    luminance,
+    cacheWidth,
+    cacheHeight,
+    'xy',
+    originX,
+    originY,
+  );
+}
+
+function decodeFirmwareJpegModelLevels(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  width: number,
+  height: number,
+) {
+  // The one-bit callback and its fresh-state phase are exact. Browser JPEG
+  // decoding cannot reproduce TJpgDec's reduced-IDCT samples byte-for-byte,
+  // so scaled JPEGs remain explicitly outside the parity claim.
+  const luminance = new Uint8Array(width * height);
+  for (let y = 0; y < height; y += 1) {
+    const sourceY = Math.min(
+      sourceHeight - 1,
+      Math.trunc((y * sourceHeight) / height),
+    );
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = Math.min(
+        sourceWidth - 1,
+        Math.trunc((x * sourceWidth) / width),
+      );
+      luminance[y * width + x] = firmwareOpaqueLuminance(
+        rgba,
+        sourceY * sourceWidth + sourceX,
+      );
+    }
+  }
+  return ditherFirmwareOneBit(luminance, width, height, 'linear', 0, 0);
+}
+
+export function ditherFirmwareOneBit(
+  luminance: Uint8Array,
+  width: number,
+  height: number,
+  thresholdPhase: 'xy' | 'linear' = 'xy',
+  originX = 0,
+  originY = 0,
+) {
+  const levels = new Uint8Array(width * height);
+  let currentErrors = new Int16Array(width + 2);
+  let nextErrors = new Int16Array(width + 2);
+  let linearPhase = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let adjusted = toFirmwareInt16(
+        currentErrors[x] + luminance[y * width + x],
+      );
+      if (adjusted < 10) adjusted = 0;
+      else if (adjusted > 245) adjusted = 255;
+      const phase = thresholdPhase === 'linear'
+        ? (linearPhase + x) & 15
+        : (originX + x + originY + y) & 15;
+      const white = adjusted > 119 + phase;
+      levels[y * width + x] = white ? 0 : 3;
+      const error = toFirmwareInt16(adjusted - (white ? 255 : 0));
+      if (error === 0) continue;
+      const unit = toFirmwareInt16((error - (error >> 3)) >> 2);
+      if (x < width - 1) {
+        currentErrors[x + 1] = toFirmwareInt16(
+          currentErrors[x + 1] + unit * 2,
+        );
+      }
+      if (x > 0) {
+        nextErrors[x - 1] = toFirmwareInt16(nextErrors[x - 1] + unit);
+      }
+      nextErrors[x] = toFirmwareInt16(nextErrors[x] + unit);
+    }
+    if (thresholdPhase === 'linear') linearPhase = (linearPhase + width) & 0xff;
+    const cleared = currentErrors;
+    currentErrors = nextErrors;
+    nextErrors = cleared;
+    nextErrors.fill(0);
+  }
+  return levels;
+}
+
+function toFirmwareInt16(value: number) {
+  return (value << 16) >> 16;
 }
 
 export function decodePlainXtgLevels(

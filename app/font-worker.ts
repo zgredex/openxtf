@@ -172,6 +172,7 @@ export type FontPreviewResult = {
       width: number;
       height: number;
       drawOffsetY: number;
+      rasterModel?: 'xtg-exact' | 'png-v6315' | 'bmp-v6315' | 'jpeg-browser';
       placeholder: boolean;
       frameClipped: boolean;
     }>;

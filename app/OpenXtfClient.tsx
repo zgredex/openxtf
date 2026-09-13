@@ -2389,7 +2389,15 @@ export default function OpenXtfClient() {
                                 <td>
                                   {image.placeholder
                                     ? copy.diagnosticImagePlaceholder
-                                    : copy.diagnosticDecodedImage}
+                                    : image.rasterModel === 'xtg-exact'
+                                      ? copy.diagnosticImageXtgExact
+                                      : image.rasterModel === 'png-v6315'
+                                        ? copy.diagnosticImagePngModel
+                                        : image.rasterModel === 'bmp-v6315'
+                                          ? copy.diagnosticImageBmpModel
+                                          : image.rasterModel === 'jpeg-browser'
+                                            ? copy.diagnosticImageJpegModel
+                                            : copy.diagnosticDecodedImage}
                                 </td>
                               </tr>
                             ))}

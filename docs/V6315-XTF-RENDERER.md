@@ -426,13 +426,28 @@ The three decoders do not hand a four-level image to the EPUB painter. Their
 current-build callbacks reduce source pixels to a one-bit drawing surface.
 RGB is converted with the fixed-point BT.601 expression
 `(77*R + 150*G + 29*B) >> 8`. Before thresholding, values 0...9 are clamped to
-0 and values 246...255 to 255. The ordered threshold is strict and
-position-dependent: a pixel becomes white only when its adjusted luminance is
-greater than `119 + ((x + y) & 15)`. The residual error is propagated to the
-right and the following row by the decoder callbacks. The BMP implementation
-contains the same coefficients, threshold, and two error rows directly.
-Transparent PNG handling has separate callbacks and must be modeled from those
-callbacks rather than browser alpha compositing.
+0 and values 246...255 to 255. The ordered comparison is strict. PNG and BMP
+make a pixel white only when its adjusted luminance is greater than
+`119 + ((absoluteX + absoluteY) & 15)`. The JPEG callback instead starts from
+the mutable byte `DAT_3fca21cc`, uses `(phase + x) & 15`, and advances the phase
+by every processed row width; the callback is the only read/write
+cross-reference to that byte. Exact JPEG cache bytes therefore also depend on
+the phase when the cache was built. The residual error is propagated to the
+right and the following row by the decoder callbacks. Instruction-level
+verification of `0x40380404`...`0x40380460` shows the custom propagation unit
+is signed `((error - (error >> 3)) >> 2)`: twice that unit goes right, one unit
+goes to the next row's preceding pixel, and one to its current pixel. This is
+not standard four-neighbour Floyd-Steinberg diffusion.
+
+The active EPUB PNG call passes center=true and allow-upscale=false. Its
+downscale ratio is unsigned 16.16; source samples mapped to one output pixel
+are averaged before the same one-bit threshold/error pass. The call passes the
+alpha-skip flag as zero and the white-background blend flag as zero, so alpha
+PNG pixels are composited against white by `FUN_42053846`; the two recovered
+alpha-skip row callbacks are not selected by this path. BMP does not use the
+PNG/JPEG scaler in `FUN_420cdf7e`: a smaller bitmap is centered, while a larger
+one is cropped to the target surface. These format-specific differences must
+not be collapsed into Canvas `drawImage` scaling.
 
 `FUN_42085056` -> `FUN_42084d72` then samples that one-bit surface and writes a
 native XTG cache file. Its header is 22 bytes: `XTG\0`, little-endian width at
@@ -460,11 +475,16 @@ been removed from the authoritative Ghidra program.
 OpenXTF must never turn image `alt` text into XTF glyphs or invent a CSS-sized
 blank line. Image record construction, page-fit integration, cached-size
 selection, centering, independent draw-Y adjustment, one-bit cache format, and
-the shared luminance/threshold core are traced. Exact browser parity for raster
-images still requires a faithful implementation of each format's scaling and
-alpha branch plus deterministic decoder fixtures; until that consumer is
-closed, framebuffer parity is explicitly limited to text-only Korean/Latin
-pages and directly decoded plain-XTG image records.
+the luminance/threshold core are traced. OpenXTF now decodes plain unexpanded
+XTG exactly, models BMP crop geometry, and applies the current PNG fixed-point
+downscale/averaging, white alpha composition, custom error propagation, and
+ordered threshold after the browser returns source RGBA pixels. It labels the
+active image model in diagnostics. Exact browser parity for JPEG remains open:
+TJpgDec's reduced-IDCT samples are not reproduced by the browser decoder and
+the cache output also depends on `DAT_3fca21cc`'s starting phase. Deterministic
+current-build decoder fixtures are still required before extending the parity
+claim beyond text-only Korean/Latin pages and directly decoded plain-XTG image
+records.
 
 The parser is not a general CSS engine. `FUN_4206ec7e` inspects only the
 literal `class` attribute and recognizes this exact keyword set:

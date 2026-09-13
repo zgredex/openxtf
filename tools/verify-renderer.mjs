@@ -22,6 +22,7 @@ try {
   const {
     applyKoreanX4Profile,
     decodePlainXtgLevels,
+    ditherFirmwareOneBit,
     renderXtfDevicePreview,
   } = await import(
     pathToFileURL(bundlePath).href
@@ -56,6 +57,14 @@ try {
     [0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3],
   );
   assert.equal(decodePlainXtgLevels(xtg, 8, 2), null);
+  assert.deepEqual(
+    Array.from(ditherFirmwareOneBit(new Uint8Array([119]), 1, 1)),
+    [3],
+  );
+  assert.deepEqual(
+    Array.from(ditherFirmwareOneBit(new Uint8Array([120]), 1, 1)),
+    [0],
+  );
   const profiled = applyKoreanX4Profile(
     {
       bytes: xtf,

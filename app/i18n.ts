@@ -344,6 +344,10 @@ export const TRANSLATIONS = {
     diagnosticImageOffset: '추가 Y 이동',
     diagnosticImageMode: '그리기 경로',
     diagnosticDecodedImage: '디코드된 이미지',
+    diagnosticImageXtgExact: '일반 XTG · 펌웨어 정확',
+    diagnosticImagePngModel: 'PNG · V6.3.15 변환 모델',
+    diagnosticImageBmpModel: 'BMP · V6.3.15 변환 모델',
+    diagnosticImageJpegModel: 'JPEG · 브라우저 디코더 / 새 위상 모델',
     diagnosticImagePlaceholder: '펌웨어 자리표시자',
     diagnosticImageAutoSuppressed:
       '양수 높이의 이미지 레코드가 있어 V6.3.15의 전체 페이지 자동 줄 재배분 분기가 비활성화되었습니다.',
@@ -833,6 +837,10 @@ export const TRANSLATIONS = {
     diagnosticImageOffset: 'Extra Y shift',
     diagnosticImageMode: 'Draw path',
     diagnosticDecodedImage: 'Decoded image',
+    diagnosticImageXtgExact: 'Plain XTG · firmware-exact',
+    diagnosticImagePngModel: 'PNG · V6.3.15 conversion model',
+    diagnosticImageBmpModel: 'BMP · V6.3.15 conversion model',
+    diagnosticImageJpegModel: 'JPEG · browser decoder / fresh-phase model',
     diagnosticImagePlaceholder: 'Firmware placeholder',
     diagnosticImageAutoSuppressed:
       'A positive-height image record disables V6.3.15 whole-page Auto line redistribution.',
