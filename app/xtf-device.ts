@@ -67,6 +67,13 @@ export type DevicePreviewBlock = {
   suppressIndent?: boolean;
   syntheticBold?: boolean;
   recordPrefix?: 0x01 | 0x1e;
+  image?: {
+    archivePath: string;
+    mediaType: string;
+    bytes: Uint8Array;
+    width: number;
+    height: number;
+  };
 };
 
 export type DevicePreviewOptions = {
@@ -224,6 +231,7 @@ type FirmwareInlineControl = {
 };
 
 type PlannedLine = {
+  kind: 'text';
   glyphs: PlannedGlyph[];
   layoutWidth: number;
   baseWidth: number;
@@ -238,6 +246,21 @@ type PlannedLine = {
   inlineControls: FirmwareInlineControl[];
   lastConsumedSourceIndex: number;
 };
+
+type PlannedImage = {
+  kind: 'image';
+  paragraphIndex: number;
+  archivePath: string;
+  sourceWidth: number;
+  sourceHeight: number;
+  width: number;
+  height: number;
+  levels: Uint8Array | null;
+  placeholder: boolean;
+  lastConsumedSourceIndex: number;
+};
+
+type PlannedRecord = PlannedLine | PlannedImage;
 
 export type XtfProfileReport = {
   sourceCellW: number;
@@ -419,12 +442,12 @@ export function applyKoreanX4Profile(
   };
 }
 
-export function renderXtfDevicePreview(
+export async function renderXtfDevicePreview(
   bytes: Uint8Array | ArrayBuffer,
   text: string,
   rasterSize: number,
   options: DevicePreviewOptions = {},
-): FontPreviewResult {
+): Promise<FontPreviewResult> {
   const xtf = parseXtf(bytes);
   const width = V6315_SCREEN_WIDTH;
   const height = V6315_SCREEN_HEIGHT;
@@ -490,10 +513,21 @@ export function renderXtfDevicePreview(
 
   const previewBlocks = normalizePreviewBlocks(text, options.blocks);
   const sourceCharacters: string[] = [];
-  const plannedLines: PlannedLine[] = [];
+  const plannedRecords: PlannedRecord[] = [];
   let sourceIndex = 0;
   for (let paragraphIndex = 0; paragraphIndex < previewBlocks.length; paragraphIndex += 1) {
     const block = previewBlocks[paragraphIndex];
+    if (block.image) {
+      plannedRecords.push(
+        await prepareFirmwareImageRecord(
+          block.image,
+          paragraphIndex,
+          contentWidth,
+          initialLineAdvance,
+        ),
+      );
+      continue;
+    }
     const paragraphGlyphs: PlannedGlyph[] = [];
     const styledCharacters = firmwareStyledTokens(block);
     for (const styledCharacter of styledCharacters) {
@@ -596,11 +630,12 @@ export function renderXtfDevicePreview(
       block.className,
       layout.alignMode,
       firmwareLanguage,
-      plannedLines,
+      plannedRecords,
     );
   }
-  if (!plannedLines.length) {
-    plannedLines.push({
+  if (!plannedRecords.length) {
+    plannedRecords.push({
+      kind: 'text',
       glyphs: [],
       layoutWidth: 0,
       baseWidth: 0,
@@ -615,20 +650,20 @@ export function renderXtfDevicePreview(
     });
   }
 
-  const pageFit = selectFirmwarePageLines(
-    plannedLines,
+  const pageFit = selectFirmwarePageRecords(
+    plannedRecords,
     layout.lineSpacing,
     initialLineAdvance,
     firmwareParagraphRatio,
     maximumWholeLines,
   );
-  const visiblePlannedLines = pageFit.lines;
+  const visibleRecords = pageFit.records;
   const paragraphBoundaryCount = countFirmwareParagraphBoundaries(
-    visiblePlannedLines,
+    visibleRecords,
   );
   const normalBoundaryCount = Math.max(
     0,
-    visiblePlannedLines.length - 1 - paragraphBoundaryCount,
+    visibleRecords.length - 1 - paragraphBoundaryCount,
   );
   const weightedIntervals = Math.fround(
     Math.fround(normalBoundaryCount) +
@@ -636,8 +671,17 @@ export function renderXtfDevicePreview(
         Math.fround(paragraphBoundaryCount) * firmwareParagraphRatio,
       ),
   );
+  const imageHeightSum = visibleRecords.reduce(
+    (sum, record) =>
+      record.kind === 'image'
+        ? Math.fround(sum + Math.fround(record.height))
+        : sum,
+    Math.fround(0),
+  );
   const autoDistributed =
-    layout.lineSpacing === 'auto' && visiblePlannedLines.length > 1;
+    layout.lineSpacing === 'auto' &&
+    visibleRecords.length > 1 &&
+    imageHeightSum <= 0;
   const lineAdvance = autoDistributed
     ? Math.fround(
         Math.fround(V6315_AUTO_VERTICAL_SPAN) / weightedIntervals,
@@ -650,22 +694,76 @@ export function renderXtfDevicePreview(
 
   let penYFloat = Math.fround(firstLineY);
   let renderedSourceIndex = -1;
-  for (let lineIndex = 0; lineIndex < visiblePlannedLines.length; lineIndex += 1) {
-    const line = visiblePlannedLines[lineIndex];
+  let textLineIndex = 0;
+  const images: NonNullable<FontPreviewResult['device']>['images'] = [];
+  for (let recordIndex = 0; recordIndex < visibleRecords.length; recordIndex += 1) {
+    const record = visibleRecords[recordIndex];
     renderedSourceIndex = Math.max(
       renderedSourceIndex,
-      line.lastConsumedSourceIndex,
+      record.lastConsumedSourceIndex,
     );
-    if (lineIndex > 0) {
-      const previous = visiblePlannedLines[lineIndex - 1];
+    if (recordIndex > 0) {
+      const previous = visibleRecords[recordIndex - 1];
       penYFloat = Math.fround(
         penYFloat +
-          (isFirmwareParagraphBoundary(previous, line)
+          (isFirmwareParagraphBoundary(previous, record)
             ? paragraphAdvance
             : lineAdvance),
       );
     }
     const penY = firmwareDrawCoordinate(penYFloat);
+    if (record.kind === 'image') {
+      const nextRecord = visibleRecords[recordIndex + 1];
+      const followingTransition = nextRecord
+        ? isFirmwareParagraphBoundary(record, nextRecord)
+          ? paragraphAdvance
+          : lineAdvance
+        : 0;
+      const drawOffsetY = firmwareImageDrawOffset(
+        recordIndex,
+        followingTransition,
+        penY,
+        record.height,
+        effectiveBaseAdvanceY,
+      );
+      const drawY = penY + drawOffsetY;
+      const drawX = left + Math.trunc((contentWidth - record.width) / 2);
+      paintFirmwareImage(
+        frame,
+        owners,
+        collisionRows,
+        collisionMask,
+        width,
+        height,
+        drawX,
+        drawY,
+        recordIndex,
+        record,
+      );
+      images.push({
+        index: images.length,
+        recordIndex,
+        archivePath: record.archivePath,
+        sourceWidth: record.sourceWidth,
+        sourceHeight: record.sourceHeight,
+        x: drawX,
+        y: drawY,
+        width: record.width,
+        height: record.height,
+        drawOffsetY,
+        placeholder: record.placeholder,
+        frameClipped:
+          drawX < 0 ||
+          drawY < 0 ||
+          drawX + record.width > width ||
+          drawY + record.height > height,
+      });
+      penYFloat = Math.fround(penYFloat + Math.fround(record.height));
+      continue;
+    }
+    const line = record;
+    const lineIndex = textLineIndex;
+    textLineIndex += 1;
 
     const availableWidth = contentWidth;
     const effectiveAlign =
@@ -682,14 +780,14 @@ export function renderXtfDevicePreview(
     );
     const inkRunWidth = horizontal.extent;
     const usedWidth = inkRunWidth;
-    const nextLine = visiblePlannedLines[lineIndex + 1];
+    const nextRecord = visibleRecords[recordIndex + 1];
     const transitionAdvance =
-      nextLine && isFirmwareParagraphBoundary(line, nextLine)
+      nextRecord && isFirmwareParagraphBoundary(line, nextRecord)
         ? paragraphAdvance
         : lineAdvance;
     const truncatedAfterLine =
-      lineIndex === visiblePlannedLines.length - 1 &&
-      visiblePlannedLines.length < plannedLines.length;
+      recordIndex === visibleRecords.length - 1 &&
+      visibleRecords.length < plannedRecords.length;
     lines.push({
       index: lineIndex,
       top: penY,
@@ -942,10 +1040,7 @@ export function renderXtfDevicePreview(
     .slice(renderedSourceIndex + 1)
     .filter((character) => character !== '\n');
   const remainingCharacters = hiddenCharacters.length;
-  const lastLine = lines.at(-1);
-  const usedHeight = lastLine
-    ? Math.max(0, lastLine.top - firstLineY)
-    : 0;
+  const usedHeight = pageFit.budget;
   let inkCollisionPixels = 0;
   for (const collision of collisionMask) {
     if (collision) inkCollisionPixels += 1;
@@ -977,6 +1072,7 @@ export function renderXtfDevicePreview(
       missingCodePoints: [...missingCodePoints].sort((a, b) => a - b),
       lines,
       glyphs,
+      images,
       spaces,
       xtfHeader: {
         flags: xtf.header.flags,
@@ -1013,6 +1109,9 @@ export function renderXtfDevicePreview(
         paragraphRatio: layout.paragraphRatio,
         paragraphAdvance,
         autoDistributed,
+        imageHeightSum,
+        autoDistributionSuppressedByImages:
+          layout.lineSpacing === 'auto' && imageHeightSum > 0,
         weightedIntervals,
         normalBoundaryCount,
         paragraphBoundaryCount,
@@ -1020,8 +1119,8 @@ export function renderXtfDevicePreview(
         pageFitBudget: pageFit.budget,
         pageFitLimit: pageFit.limit,
         recordsRemovedByPageFit: pageFit.removed,
-        blankLineRecords: visiblePlannedLines.filter(
-          (line) => line.glyphs.length === 0,
+        blankLineRecords: visibleRecords.filter(
+          (record) => record.kind === 'text' && record.glyphs.length === 0,
         ).length,
         indentChars: layout.indentChars,
         cjkIndentPixels: xtf.header.fullWidth * layout.indentChars,
@@ -1044,15 +1143,21 @@ export function renderXtfDevicePreview(
         // Count each visible source index once so
         // this diagnostic cannot imply that source data was duplicated.
         displayedCharacters: new Set(
-          visiblePlannedLines.flatMap((line) =>
-            line.glyphs
-              .map((glyph) => glyph.sourceIndex)
-              .filter((index) => index >= 0),
+          visibleRecords.flatMap((record) =>
+            record.kind === 'text'
+              ? record.glyphs
+                  .map((glyph) => glyph.sourceIndex)
+                  .filter((index) => index >= 0)
+              : [],
           ),
         ).size,
         totalCharacters: sourceCharacters.length,
         remainingCharacters,
-        truncated: remainingCharacters > 0,
+        displayedRecords: visibleRecords.length,
+        totalRecords: plannedRecords.length,
+        remainingRecords: plannedRecords.length - visibleRecords.length,
+        truncated:
+          remainingCharacters > 0 || visibleRecords.length < plannedRecords.length,
         lastVisibleCharacter:
           renderedSourceIndex >= 0 ? sourceCharacters[renderedSourceIndex] : '',
         firstHiddenCharacter: hiddenCharacters[0] ?? '',
@@ -1061,6 +1166,240 @@ export function renderXtfDevicePreview(
       },
     },
   };
+}
+
+async function prepareFirmwareImageRecord(
+  image: NonNullable<DevicePreviewBlock['image']>,
+  paragraphIndex: number,
+  contentWidth: number,
+  lineStep: number,
+): Promise<PlannedImage> {
+  const defaultHeight = firmwareDefaultImageHeight(lineStep);
+  const scaled = firmwareScaleImageDimensions(
+    image.width,
+    image.height,
+    contentWidth,
+    defaultHeight,
+  );
+  let levels: Uint8Array | null = null;
+  if (scaled && image.bytes.length) {
+    levels = await decodeBrowserImageLevels(
+      image.bytes,
+      image.mediaType,
+      scaled.width,
+      scaled.height,
+    );
+  }
+  const height = scaled?.height ?? defaultHeight;
+  const placeholder = levels === null;
+  const width = placeholder
+    ? firmwarePlaceholderImageWidth(contentWidth, height, lineStep)
+    : scaled?.width ?? contentWidth;
+  return {
+    kind: 'image',
+    paragraphIndex,
+    archivePath: image.archivePath,
+    sourceWidth: image.width,
+    sourceHeight: image.height,
+    width,
+    height,
+    levels,
+    placeholder,
+    lastConsumedSourceIndex: -1,
+  };
+}
+
+function firmwareDefaultImageHeight(lineStep: number) {
+  // FUN_42094246: max(round(FUN_420941ec() * 0.8), round(lineStep)), min 1.
+  // With the normal no-footer X4 surface FUN_420941ec is 800 - 22 - 17.
+  const available = V6315_SCREEN_HEIGHT - V6315_FIRST_LINE_Y -
+    V6315_MANUAL_BOTTOM_RESERVE;
+  return Math.max(
+    1,
+    firmwareRoundPositive(Math.fround(Math.fround(available) * Math.fround(0.8))),
+    firmwareRoundPositive(lineStep),
+  );
+}
+
+function firmwareScaleImageDimensions(
+  sourceWidth: number,
+  sourceHeight: number,
+  maximumWidth: number,
+  maximumHeight: number,
+) {
+  // FUN_42052456/FUN_420ce0d0 never upscale. If either source dimension is
+  // too large they use the smaller ratio, add 0.5f, convert to unsigned and
+  // clamp each result to at least one and to its target bound.
+  if (
+    sourceWidth < 1 ||
+    sourceHeight < 1 ||
+    maximumWidth < 1 ||
+    maximumHeight < 1
+  ) {
+    return null;
+  }
+  let width = sourceWidth;
+  let height = sourceHeight;
+  if (sourceWidth > maximumWidth || sourceHeight > maximumHeight) {
+    let scale = Math.fround(
+      Math.min(
+        Math.fround(maximumWidth / sourceWidth),
+        Math.fround(maximumHeight / sourceHeight),
+      ),
+    );
+    if (!(scale > 0)) scale = Math.fround(1);
+    width = Math.max(
+      1,
+      firmwareRoundPositive(Math.fround(Math.fround(sourceWidth) * scale)),
+    );
+    height = Math.max(
+      1,
+      firmwareRoundPositive(Math.fround(Math.fround(sourceHeight) * scale)),
+    );
+  }
+  return {
+    width: Math.min(maximumWidth, width),
+    height: Math.min(maximumHeight, height),
+  };
+}
+
+function firmwareRoundPositive(value: number) {
+  return Math.trunc(Math.fround(Math.fround(value) + Math.fround(0.5)));
+}
+
+function firmwarePlaceholderImageWidth(
+  contentWidth: number,
+  imageHeight: number,
+  lineStep: number,
+) {
+  // PaintPageTextV6315's failed-cache branch normally uses the whole content
+  // span. For a very short image (no taller than the rounded line step) it
+  // substitutes a square no wider than the content span and centres it.
+  return imageHeight <= firmwareRoundPositive(lineStep)
+    ? Math.min(contentWidth, imageHeight)
+    : contentWidth;
+}
+
+async function decodeBrowserImageLevels(
+  bytes: Uint8Array,
+  mediaType: string,
+  width: number,
+  height: number,
+) {
+  if (typeof createImageBitmap !== 'function') return null;
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(
+      new Blob([bytes.slice().buffer], {
+        type: /^image\//i.test(mediaType) ? mediaType : undefined,
+      }),
+    );
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, width, height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0, width, height);
+    const rgba = context.getImageData(0, 0, width, height).data;
+    const levels = new Uint8Array(width * height);
+    for (let index = 0; index < levels.length; index += 1) {
+      const offset = index * 4;
+      const alpha = rgba[offset + 3];
+      const red = 255 - Math.round(((255 - rgba[offset]) * alpha) / 255);
+      const green = 255 - Math.round(((255 - rgba[offset + 1]) * alpha) / 255);
+      const blue = 255 - Math.round(((255 - rgba[offset + 2]) * alpha) / 255);
+      const luminance = Math.round(
+        (red * 299 + green * 587 + blue * 114) / 1000,
+      );
+      levels[index] = Math.max(
+        0,
+        Math.min(3, Math.round(((255 - luminance) * 3) / 255)),
+      );
+    }
+    return levels;
+  } catch {
+    return null;
+  } finally {
+    bitmap?.close();
+  }
+}
+
+function firmwareImageDrawOffset(
+  recordIndex: number,
+  followingTransition: number,
+  currentY: number,
+  imageHeight: number,
+  lineStep: number,
+) {
+  // Exact FUN_42054d8a no-footer branch.
+  if (recordIndex === 0 || !(followingTransition > 4)) return 0;
+  let offset = Math.min(
+    firmwareRoundPositive(Math.fround(Math.fround(lineStep) * Math.fround(0.4))),
+    firmwareRoundPositive(
+      Math.fround(Math.fround(followingTransition) * Math.fround(0.28)),
+    ),
+  );
+  if (offset < 1) return 0;
+  const remaining =
+    V6315_SCREEN_HEIGHT - V6315_MANUAL_BOTTOM_RESERVE -
+    (currentY + imageHeight);
+  if (remaining >= 1 && remaining < offset) offset = remaining;
+  return offset;
+}
+
+function paintFirmwareImage(
+  frame: Uint8Array,
+  owners: Int16Array,
+  collisionRows: Set<number>,
+  collisionMask: Uint8Array,
+  frameW: number,
+  frameH: number,
+  originX: number,
+  originY: number,
+  ownerIndex: number,
+  image: PlannedImage,
+) {
+  const paint = (x: number, y: number, level: number) => {
+    if (!level) return;
+    const targetX = originX + x;
+    const targetY = originY + y;
+    if (targetX < 0 || targetX >= frameW || targetY < 0 || targetY >= frameH) {
+      return;
+    }
+    const index = targetY * frameW + targetX;
+    if (frame[index] && owners[index] >= 0 && owners[index] !== ownerIndex) {
+      collisionRows.add(targetY);
+      collisionMask[index] = 1;
+    }
+    frame[index] |= level;
+    owners[index] = ownerIndex;
+  };
+
+  if (image.levels) {
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        paint(x, y, image.levels[y * image.width + x]);
+      }
+    }
+    return;
+  }
+
+  // FUN_4204d5dc clips to the framebuffer and draws a rectangular fallback
+  // when the decoded cache cannot be used. Pixel-exact driver colour handling
+  // for this rare branch remains in the decoder closure audit.
+  for (let x = 0; x < image.width; x += 1) {
+    paint(x, 0, 3);
+    paint(x, image.height - 1, 3);
+  }
+  for (let y = 1; y + 1 < image.height; y += 1) {
+    paint(0, y, 3);
+    paint(image.width - 1, y, 3);
+  }
 }
 
 function normalizeFirmwareLanguage(language: string) {
@@ -1337,7 +1676,7 @@ function planFirmwareLines(
   sourceClass: string | undefined,
   alignMode: DeviceAlignMode,
   firmwareLanguage: string,
-  output: PlannedLine[],
+  output: PlannedRecord[],
 ) {
   let current: PlannedGlyph[] = [];
   let currentLayoutWidth = 0;
@@ -1360,6 +1699,7 @@ function planFirmwareLines(
       currentPaintWidth -= removed.glyph.advance;
     }
     output.push({
+      kind: 'text',
       glyphs: current,
       layoutWidth: currentLayoutWidth,
       baseWidth: currentPaintWidth,
@@ -1796,59 +2136,74 @@ function firmwareManualMaximumLines(
   return maximumLines;
 }
 
-function selectFirmwarePageLines(
-  lines: PlannedLine[],
+function selectFirmwarePageRecords(
+  records: PlannedRecord[],
   lineSpacing: DeviceLineSpacing,
   initialLineAdvance: number,
   paragraphRatio: number,
   maximumLines: number,
 ) {
-  const selected = lines.slice(0, Math.max(1, maximumLines));
+  const selected = records.slice(0, Math.max(1, maximumLines));
   // ProcessEpubContentV6315 keeps a separate binary32 vertical budget after
   // the row-count cap from InitializeXtfReaderLayoutV6315. FUN_4204d442 uses
   // transition accounting for every manual choice and for Auto whenever the
   // paragraph ratio is > 1.0. Auto + 1x takes the record-step branch instead.
   const transitionStepMode =
     lineSpacing !== 'auto' || Math.fround(paragraphRatio) > Math.fround(1);
-  const fitted: PlannedLine[] = [];
+  const fitted: PlannedRecord[] = [];
   let budget = Math.fround(0);
   const availableBudget = Math.fround(
     V6315_SCREEN_HEIGHT -
       V6315_MANUAL_BOTTOM_RESERVE -
       V6315_FIRST_LINE_Y,
   );
-  // FUN_42094f8e compares firstY + budget against (screenH - 17) - 0.5f.
-  // This is one pixel stricter than the separate +0.5f gap-budget check.
-  const limit = Math.fround(availableBudget - Math.fround(0.5));
-  const gapLimit = Math.fround(availableBudget + Math.fround(0.5));
+  // Correct-ELF FUN_42094f8e adds 0.5f to (screenH - 17), then reports
+  // overflow only when firstY + budget is larger than that value. The
+  // surrounding gap-budget comparison uses the same available + 0.5f
+  // threshold. An earlier transcription had the sign reversed and was one
+  // physical row too strict at the boundary.
+  const limit = Math.fround(availableBudget + Math.fround(0.5));
+  const gapLimit = limit;
   for (let index = 0; index < selected.length; index += 1) {
-    const line = selected[index];
+    const record = selected[index];
     let nextBudget = budget;
     if (transitionStepMode) {
       if (fitted.length) {
         const previous = fitted[fitted.length - 1];
-        const advance = isFirmwareParagraphBoundary(previous, line)
+        const advance = isFirmwareParagraphBoundary(previous, record)
           ? Math.fround(initialLineAdvance * Math.fround(paragraphRatio))
           : initialLineAdvance;
         nextBudget = Math.fround(budget + advance);
       }
+      if (record.kind === 'image') {
+        nextBudget = Math.fround(nextBudget + Math.fround(record.height));
+      }
     } else {
       // The no-height-budget branch advances once for each committed record,
-      // including the first. On overflow FUN_420e1840 rolls that record back.
-      nextBudget = Math.fround(budget + initialLineAdvance);
+      // including the first. Image records substitute their selected height
+      // for that ordinary text-record step. On overflow FUN_420e1840 rolls
+      // the record back.
+      nextBudget = Math.fround(
+        budget +
+          Math.fround(
+            record.kind === 'image' ? record.height : initialLineAdvance,
+          ),
+      );
     }
     if (nextBudget > gapLimit || nextBudget > limit) break;
-    fitted.push(line);
+    fitted.push(record);
     budget = nextBudget;
   }
   if (!fitted.length && selected.length) {
-    // The initialized layout always admits the first ordinary text record;
-    // retain that invariant for malformed/extreme custom header values.
-    fitted.push(selected[0]);
-    budget = transitionStepMode ? Math.fround(0) : initialLineAdvance;
+    // The initialized layout always admits the first ordinary text record.
+    // An over-tall first image is instead rejected by FUN_42094eb0.
+    if (selected[0].kind === 'text') {
+      fitted.push(selected[0]);
+      budget = transitionStepMode ? Math.fround(0) : initialLineAdvance;
+    }
   }
   return {
-    lines: fitted,
+    records: fitted,
     mode: transitionStepMode
       ? ('transition-step' as const)
       : ('record-step' as const),
@@ -1859,20 +2214,21 @@ function selectFirmwarePageLines(
 }
 
 function isFirmwareParagraphBoundary(
-  previous: PlannedLine,
-  next: PlannedLine,
+  previous: PlannedRecord,
+  next: PlannedRecord,
 ) {
   return (
+    previous.kind === 'text' &&
     previous.breakReason === 'paragraph' &&
     previous.glyphs.length > 0 &&
-    next.glyphs.length > 0
+    (next.kind === 'image' || next.glyphs.length > 0)
   );
 }
 
-function countFirmwareParagraphBoundaries(lines: PlannedLine[]) {
+function countFirmwareParagraphBoundaries(records: PlannedRecord[]) {
   let count = 0;
-  for (let index = 1; index < lines.length; index += 1) {
-    if (isFirmwareParagraphBoundary(lines[index - 1], lines[index])) count += 1;
+  for (let index = 1; index < records.length; index += 1) {
+    if (isFirmwareParagraphBoundary(records[index - 1], records[index])) count += 1;
   }
   return count;
 }

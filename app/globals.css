@@ -1500,7 +1500,8 @@ footer p + p {
 }
 
 .diagnostic-advance-box,
-.diagnostic-ink-box {
+.diagnostic-ink-box,
+.diagnostic-image-box {
   position: absolute;
   box-sizing: border-box;
 }
@@ -1529,6 +1530,20 @@ footer p + p {
 }
 
 .diagnostic-ink-box.is-clipped {
+  border-color: rgb(173 45 45 / 92%);
+  border-width: 2px;
+}
+
+.diagnostic-image-box {
+  border: 1px solid rgb(100 74 145 / 72%);
+  background: rgb(100 74 145 / 4%);
+}
+
+.diagnostic-image-box.is-placeholder {
+  border-style: dashed;
+}
+
+.diagnostic-image-box.is-clipped {
   border-color: rgb(173 45 45 / 92%);
   border-width: 2px;
 }
@@ -1624,6 +1639,11 @@ footer p + p {
 
 .diagnostic-overlay-legend .is-ink::before {
   border-color: rgb(51 122 87 / 75%);
+}
+
+.diagnostic-overlay-legend .is-image::before {
+  border-color: rgb(100 74 145 / 82%);
+  background: rgb(100 74 145 / 8%);
 }
 
 .diagnostic-overlay-legend .is-baseline::before {

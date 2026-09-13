@@ -163,6 +163,12 @@ and then verifies the last origin with the same `0.99f` comparison bias. This
 is why capacity must not be derived from CSS height or from the old 654 px
 settings-preview function.
 
+The later record-budget predicate in `FUN_42094f8e` compares the accumulated
+budget against `(screenHeight - 17) + 0.5f`, not against a rounded-down
+integer. With the ordinary first origin at 22 px, the exact no-footer limit is
+`783.5 - 22 = 761.5f` px. OpenXTF keeps this as binary32 arithmetic; using
+760.5 px removes a record one row earlier than the firmware.
+
 ## Auto is page-dependent
 
 The UI's Auto choice is detected by `FUN_4204d3ea` using the values around 1.0
@@ -349,12 +355,44 @@ archive path, reads the source dimensions, scales down while preserving aspect
 ratio, and creates a special page record. `FUN_420942d2` serializes that record
 as byte `0x04`, an optional `F,` marker, the decimal selected height, `|`, and
 the resolved path. `FUN_42073b4c` recognizes it and `FUN_420943b4` recovers its
-height. `PaintPageTextV6315` then excludes those heights from the ordinary
-text-only Auto denominator, calculates their Y positions through
-`FUN_42054d8a`, centers the decoded image when its width is smaller than the
-available span, and draws it through `FUN_4207c836`. The surrounding state
-machine has distinct `img_before_*`, `img_bottom`, and `img_after_*` fit exits,
-so an image changes pagination even though it is not a text line.
+height. A missing/zero height falls back to `FUN_42094246`, which chooses the
+larger of one rounded XTF line step and 80% of the available reading height,
+with a minimum of one pixel.
+
+`PaintPageTextV6315` sums the parsed height of every image record before its
+Auto-spacing decision. The exact guard is important: a positive image-height
+sum bypasses the whole-page redistribution formula and keeps the base line
+step returned by `FUN_420570dc`. The later subtraction of the image sum inside
+the redistribution formula is therefore present in the binary but unreachable
+for an ordinary page containing a positive-height image. Earlier notes that
+described image pages as Auto-redistributed were wrong.
+
+For each image the painter advances page flow by the image height and, unless
+it is the final record, by the same following line/paragraph transition that a
+text record would receive. `FUN_42054d8a`
+can move only the image pixels downward without moving the following record:
+for a non-first image whose following transition is greater than four pixels,
+the offset is the smaller of `round(baseLineStep * 0.4)` and
+`round(followingTransition * 0.28)`, capped to positive remaining page space.
+This distinction between image draw Y and the flow accumulator is required for
+matching the next text origin.
+
+The decoded-image path is also verified. `FUN_420db344` builds or reuses the
+cache entry keyed by resolved path and target dimensions. Its worker reaches
+`FUN_420ce0d0`, which reads the source dimensions, chooses
+`min(targetW/sourceW, targetH/sourceH)` when downscaling is needed, rounds both
+scaled dimensions by adding `0.5` before unsigned conversion, never upscales,
+and centers the result in the target canvas. `FUN_4207c6fa` returns the cached
+width and height. The painter centers that finished width inside the current
+content span and `FUN_4207c836` draws it at the requested origin. If no usable
+cache entry is available, the alternate `FUN_4204d5dc` branch draws a clipped
+rectangular placeholder; it does not substitute EPUB `alt` text.
+
+The surrounding state machine has distinct `img_before_*`, `img_bottom`, and
+`img_after_*` fit exits, so an image changes pagination even though it is not a
+text line. Text accumulated before the image is committed first. When text
+continues after the image, the builder also budgets its following normal or
+paragraph-scaled transition.
 
 `ReadXtgImageDimensionsV6315` at ELF `0x420e0f5e` reads native XTG dimensions.
 `FUN_420e1152` handles cached dimensions plus JPEG, BMP, and PNG headers.
@@ -363,10 +401,11 @@ described `0x420e0f5e` as an EPUB composition state machine was wrong and has
 been removed from the authoritative Ghidra program.
 
 OpenXTF must never turn image `alt` text into XTF glyphs or invent a CSS-sized
-blank line. Exact image-record placement and the image decoder's logical
-framebuffer output are still an open implementation item; until that consumer
-is closed, framebuffer parity is explicitly limited to text-only Korean/Latin
-pages.
+blank line. Image record construction, page-fit integration, cached-size
+selection, centering, and the independent draw-Y adjustment are now fully
+traced. The format-specific decoder's final logical gray conversion is still
+an open implementation item; until that consumer is closed, framebuffer parity
+is explicitly limited to text-only Korean/Latin pages.
 
 The parser is not a general CSS engine. `FUN_4206ec7e` inspects only the
 literal `class` attribute and recognizes this exact keyword set:
@@ -955,8 +994,14 @@ placement pass. They expose:
 - per-glyph splitter advance, XTF painter advance, final distributed advance,
   fallback paths, and clipping;
 - the serialized U+0020 ASCII-table entry, its fallback, and other whitespace
-  paths; and
-- page truncation and the first source character assigned to the next page.
+  paths;
+- each EPUB image record's source dimensions, firmware-selected draw size,
+  centered draw origin, independent Y offset, cache/placeholder path, and
+  frame clipping;
+- image suppression of whole-page Auto redistribution, plus image-inclusive
+  record capacity and page-fit budget; and
+- page truncation, remaining record count, and the first source character
+  assigned to the next page.
 
 The preview is not considered closed or 1:1 while any active EPUB-composer
 branch remains approximated. The remaining implementation audit is maintained

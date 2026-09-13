@@ -80,7 +80,7 @@ try {
       strictCrop: false,
     },
   );
-  const profiledPreview = renderXtfDevicePreview(profiled.bytes, 'A A', 29);
+  const profiledPreview = await renderXtfDevicePreview(profiled.bytes, 'A A', 29);
   assert.equal(profiledPreview.device.xtfHeader.cellW, 39);
   assert.equal(profiledPreview.device.xtfHeader.cellH, 38);
   assert.equal(profiledPreview.device.xtfHeader.storedAdvanceY, 38);
@@ -99,7 +99,7 @@ try {
     startsParagraph: true,
   }));
 
-  const manual = renderXtfDevicePreview(xtf, '', 29, {
+  const manual = await renderXtfDevicePreview(xtf, '', 29, {
     blocks: paragraphBlocks,
     layout: {
       lineSpacing: 1.2,
@@ -114,7 +114,7 @@ try {
   assert.equal(manual.device.layout.recordsRemovedByPageFit, 4);
   assert.equal(manual.device.lines[1].top, 91);
 
-  const automaticParagraphs = renderXtfDevicePreview(xtf, '', 29, {
+  const automaticParagraphs = await renderXtfDevicePreview(xtf, '', 29, {
     blocks: paragraphBlocks,
     layout: {
       lineSpacing: 'auto',
@@ -130,7 +130,7 @@ try {
   assert.equal(automaticParagraphs.device.lines.at(-1).top, 778);
   assert.equal(automaticParagraphs.device.layout.lineAdvance, Math.fround(50.4));
 
-  const automaticOneX = renderXtfDevicePreview(xtf, '', 29, {
+  const automaticOneX = await renderXtfDevicePreview(xtf, '', 29, {
     blocks: paragraphBlocks,
     layout: {
       lineSpacing: 'auto',
@@ -144,7 +144,7 @@ try {
   assert.equal(automaticOneX.device.layout.recordsRemovedByPageFit, 1);
   assert.equal(automaticOneX.device.lines.at(-1).top, 778);
 
-  const narrowHangul = renderXtfDevicePreview(xtf, '가'.repeat(30), 29, {
+  const narrowHangul = await renderXtfDevicePreview(xtf, '가'.repeat(30), 29, {
     layout: {
       lineSpacing: 1.2,
       paragraphRatio: 1.5,
@@ -154,7 +154,7 @@ try {
   });
   const widerXtf = xtf.slice();
   widerXtf[0x0d] = 30;
-  const wideHangul = renderXtfDevicePreview(widerXtf, '가'.repeat(30), 29, {
+  const wideHangul = await renderXtfDevicePreview(widerXtf, '가'.repeat(30), 29, {
     layout: {
       lineSpacing: 1.2,
       paragraphRatio: 1.5,
@@ -168,7 +168,7 @@ try {
   assert.equal(wideHangul.device.xtfHeader.fullWidth, 30);
 
   const spacedHangul = `${'가'.repeat(7)} ${'가'.repeat(20)}`;
-  const aligned = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+  const aligned = await renderXtfDevicePreview(xtf, spacedHangul, 29, {
     layout: {
       lineSpacing: 1.2,
       paragraphRatio: 1.5,
@@ -176,7 +176,7 @@ try {
       alignMode: 'wrap-align',
     },
   });
-  const right = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+  const right = await renderXtfDevicePreview(xtf, spacedHangul, 29, {
     layout: {
       lineSpacing: 1.2,
       paragraphRatio: 1.5,
@@ -184,7 +184,7 @@ try {
       alignMode: 'right',
     },
   });
-  const left = renderXtfDevicePreview(xtf, spacedHangul, 29, {
+  const left = await renderXtfDevicePreview(xtf, spacedHangul, 29, {
     layout: {
       lineSpacing: 1.2,
       paragraphRatio: 1.5,
@@ -201,7 +201,7 @@ try {
   assert.equal(left.device.lines[0].placementBranch, 'direct');
   assert.equal(left.device.lines[0].justificationPixels, 0);
 
-  const explicitEndings = renderXtfDevicePreview(xtf, '', 29, {
+  const explicitEndings = await renderXtfDevicePreview(xtf, '', 29, {
     blocks: [
       {
         text: 'A\tB',
@@ -237,6 +237,79 @@ try {
   assert.equal(explicitEndings.device.lines[0].placementBranch, 'direct');
   assert.deepEqual(explicitEndings.device.lines[1].recordSuffixBytes, [0x0a]);
   assert.equal(explicitEndings.device.lines[2].endOfSourceFlag, true);
+
+  const imageBlocks = [
+    {
+      text: 'A',
+      tag: 'p',
+      className: '',
+      breakAfter: 'paragraph',
+      startsParagraph: true,
+    },
+    {
+      text: '',
+      tag: 'img',
+      className: '',
+      breakAfter: 'soft',
+      startsParagraph: false,
+      image: {
+        archivePath: 'OPS/image.png',
+        mediaType: 'image/png',
+        bytes: new Uint8Array(),
+        width: 100,
+        height: 200,
+      },
+    },
+    {
+      text: 'B',
+      tag: 'p',
+      className: '',
+      breakAfter: 'text-end',
+      startsParagraph: false,
+    },
+  ];
+  const manualImagePage = await renderXtfDevicePreview(xtf, '', 29, {
+    blocks: imageBlocks,
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'left',
+    },
+  });
+  assert.equal(manualImagePage.device.images.length, 1);
+  assert.equal(manualImagePage.device.images[0].placeholder, true);
+  assert.equal(manualImagePage.device.images[0].height, 200);
+  assert.equal(manualImagePage.device.images[0].width, 446);
+  assert.equal(manualImagePage.device.images[0].y, 104);
+  assert.equal(manualImagePage.device.images[0].drawOffsetY, 13);
+  assert.deepEqual(
+    manualImagePage.device.lines.map((line) => line.top),
+    [22, 336],
+  );
+  assert.equal(
+    manualImagePage.device.layout.pageFitBudget,
+    Math.fround(Math.fround(Math.fround(45.6) * Math.fround(1.5)) + 200 + Math.fround(45.6)),
+  );
+
+  const automaticImagePage = await renderXtfDevicePreview(xtf, '', 29, {
+    blocks: imageBlocks,
+    layout: {
+      lineSpacing: 'auto',
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'left',
+    },
+  });
+  assert.equal(automaticImagePage.device.layout.autoDistributed, false);
+  assert.equal(automaticImagePage.device.layout.lineAdvance, Math.fround(47.25));
+  assert.equal(automaticImagePage.device.images[0].drawOffsetY, 13);
+  assert.deepEqual(
+    automaticImagePage.device.lines.map((line) => line.top),
+    [22, 341],
+  );
+  assert.equal(automaticImagePage.device.pageUsage.displayedRecords, 3);
+  assert.equal(automaticImagePage.device.pageUsage.remainingRecords, 0);
 
   const fallbackGlyph = narrowHangul.device.glyphs.find(
     (glyph) => glyph.codePoint === 0xac00,

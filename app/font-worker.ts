@@ -161,6 +161,20 @@ export type FontPreviewResult = {
         height: number;
       } | null;
     }>;
+    images?: Array<{
+      index: number;
+      recordIndex: number;
+      archivePath: string;
+      sourceWidth: number;
+      sourceHeight: number;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      drawOffsetY: number;
+      placeholder: boolean;
+      frameClipped: boolean;
+    }>;
     spaces?: Array<{
       codePoint: number;
       recordCodePoint?: number | null;
@@ -217,6 +231,8 @@ export type FontPreviewResult = {
       paragraphRatio?: 1 | 1.25 | 1.5 | 1.75 | 2;
       paragraphAdvance?: number;
       autoDistributed?: boolean;
+      imageHeightSum?: number;
+      autoDistributionSuppressedByImages?: boolean;
       weightedIntervals?: number;
       normalBoundaryCount?: number;
       paragraphBoundaryCount?: number;
@@ -244,6 +260,9 @@ export type FontPreviewResult = {
       displayedCharacters: number;
       totalCharacters: number;
       remainingCharacters: number;
+      displayedRecords?: number;
+      totalRecords?: number;
+      remainingRecords?: number;
       truncated: boolean;
       lastVisibleCharacter: string;
       firstHiddenCharacter?: string;

@@ -217,7 +217,7 @@ export const TRANSLATIONS = {
     epubLoaded: (title: string, count: number) =>
       `${title} · 본문 ${count}개`,
     epubPrivacyHint:
-      'EPUB은 브라우저 안에서만 열립니다. V6.3.15처럼 빈 XHTML 요소는 건너뛰고 실제 텍스트 안의 명시적 줄바꿈만 보존합니다. CSS 글꼴·크기·굵기·줄 높이·여백은 적용하지 않습니다. 이미지는 텍스트로 바꾸지 않으며, 루비 배치는 재현하지 않고 루비 안의 텍스트만 펌웨어처럼 이어서 처리합니다.',
+      'EPUB은 브라우저 안에서만 열립니다. V6.3.15처럼 빈 XHTML 요소는 건너뛰고 실제 텍스트 안의 명시적 줄바꿈만 보존합니다. CSS 글꼴·크기·굵기·줄 높이·여백은 적용하지 않습니다. 이미지는 대체 텍스트가 아니라 별도 이미지 레코드로 배치하며, 루비 배치는 재현하지 않고 루비 안의 텍스트만 펌웨어처럼 이어서 처리합니다.',
     epubInvalidError:
       '이 EPUB을 읽을 수 없습니다. DRM이 없는 표준 EPUB 파일인지 확인하세요. 최대 크기는 100MB입니다.',
     epubEmptyError: 'EPUB의 읽기 순서에서 표시할 본문을 찾지 못했습니다.',
@@ -239,9 +239,12 @@ export const TRANSLATIONS = {
     overlayBaseline: '줄 그리기 원점',
     overlayCollision: '충돌 픽셀',
     overlayBreaks: '줄바꿈 지점',
+    overlayImages: '이미지 레코드',
     diagnosticOverview: '펌웨어 렌더링 개요',
     diagnosticLines: '표시된 줄 / 현재 설정의 최대 줄',
     diagnosticPageCharacters: '표시 원문 문자 / 펌웨어 토큰 문자',
+    diagnosticPageRecords: '표시 레코드 / 전체 레코드',
+    diagnosticImages: '이미지 / 자리표시자',
     diagnosticPitch: '줄 원점 진행 공식',
     diagnosticPaginationPitch: '페이지 구성용 초기 진행값',
     diagnosticPageFitBudget: '페이지 구성 높이 예산',
@@ -271,7 +274,7 @@ export const TRANSLATIONS = {
     diagnosticParagraphExtra: '문단 추가 간격',
     diagnosticRetainedBlankBlocks: '건너뛴 빈 XHTML 요소 / 표시된 빈 줄 레코드',
     diagnosticCellOverlap: '셀 세로 겹침',
-    diagnosticVerticalUse: '첫–마지막 줄 원점 범위 / 남은 원점 범위',
+    diagnosticVerticalUse: '사용한 페이지 예산 / 남은 페이지 예산',
     diagnosticCollision: '줄 간 잉크 충돌',
     diagnosticMissing: '미표시 문자',
     diagnosticRows: '행',
@@ -294,8 +297,12 @@ export const TRANSLATIONS = {
     diagnosticLineCollisionsDetail:
       '서로 다른 줄의 실제 잉크가 같은 프레임 픽셀을 차지한 결과입니다.',
     diagnosticPageTruncation: '페이지 끝 잘림',
-    diagnosticPageTruncationDetail: (count: number, character: string) =>
-      `이 페이지 뒤에 펌웨어가 토큰화한 본문 문자 ${koNumber(count)}개가 남습니다. 데이터 손실이 아니라 다음 페이지 분량입니다. 다음 페이지의 첫 문자: ${character || '—'}`,
+    diagnosticPageTruncationDetail: (
+      count: number,
+      character: string,
+      records = 0,
+    ) =>
+      `이 페이지 뒤에 펌웨어가 토큰화한 본문 문자 ${koNumber(count)}개와 레코드 ${koNumber(records)}개가 남습니다. 데이터 손실이 아니라 다음 페이지 분량입니다. 다음 페이지의 첫 문자: ${character || '—'}`,
     diagnosticPageFits: '현재 입력 텍스트가 이 페이지 안에 모두 들어갑니다.',
     yes: '예',
     no: '아니요',
@@ -329,6 +336,17 @@ export const TRANSLATIONS = {
       tab: '탭',
     },
     diagnosticSpaceTable: '공백 문자 너비',
+    diagnosticImageTable: 'EPUB 이미지 레코드',
+    diagnosticImagePath: '보관 경로',
+    diagnosticSourceSize: '원본 크기',
+    diagnosticDrawSize: '그리기 크기',
+    diagnosticDrawOrigin: '그리기 원점',
+    diagnosticImageOffset: '추가 Y 이동',
+    diagnosticImageMode: '그리기 경로',
+    diagnosticDecodedImage: '디코드된 이미지',
+    diagnosticImagePlaceholder: '펌웨어 자리표시자',
+    diagnosticImageAutoSuppressed:
+      '양수 높이의 이미지 레코드가 있어 V6.3.15의 전체 페이지 자동 줄 재배분 분기가 비활성화되었습니다.',
     diagnosticCharacter: '문자',
     diagnosticCodePoint: '코드 포인트',
     diagnosticRecordCodePoint: '레코드 코드',
@@ -688,7 +706,7 @@ export const TRANSLATIONS = {
     epubLoaded: (title: string, count: number) =>
       `${title} · ${count} reading section${count === 1 ? '' : 's'}`,
     epubPrivacyHint:
-      'The EPUB stays inside your browser. Like V6.3.15, empty XHTML elements are skipped while explicit breaks inside real text are preserved. CSS fonts, sizes, weights, line heights, and margins are not applied. Images are not converted to text; ruby positioning is not reproduced, while text inside ruby markup continues through the tokenizer as it does in firmware.',
+      'The EPUB stays inside your browser. Like V6.3.15, empty XHTML elements are skipped while explicit breaks inside real text are preserved. CSS fonts, sizes, weights, line heights, and margins are not applied. Images are placed as separate image records instead of alt text; ruby positioning is not reproduced, while text inside ruby markup continues through the tokenizer as it does in firmware.',
     epubInvalidError:
       'This EPUB could not be read. Check that it is a standard DRM-free EPUB no larger than 100 MB.',
     epubEmptyError: 'No readable content was found in the EPUB spine.',
@@ -710,9 +728,12 @@ export const TRANSLATIONS = {
     overlayBaseline: 'Line draw origins',
     overlayCollision: 'Collision pixels',
     overlayBreaks: 'Break points',
+    overlayImages: 'Image records',
     diagnosticOverview: 'Firmware rendering overview',
     diagnosticLines: 'Visible / maximum lines at current settings',
     diagnosticPageCharacters: 'Displayed source chars / firmware-tokenized chars',
+    diagnosticPageRecords: 'Displayed records / total records',
+    diagnosticImages: 'Images / placeholders',
     diagnosticPitch: 'Line-origin step formula',
     diagnosticPaginationPitch: 'Initial pagination step',
     diagnosticPageFitBudget: 'Page-composition height budget',
@@ -742,8 +763,7 @@ export const TRANSLATIONS = {
     diagnosticParagraphExtra: 'Extra paragraph gap',
     diagnosticRetainedBlankBlocks: 'Skipped empty XHTML elements / visible empty line records',
     diagnosticCellOverlap: 'Vertical cell overlap',
-    diagnosticVerticalUse:
-      'First-to-last line-origin span / remaining line-origin span',
+    diagnosticVerticalUse: 'Page-fit budget used / remaining page-fit budget',
     diagnosticCollision: 'Cross-line ink collision',
     diagnosticMissing: 'Unrendered characters',
     diagnosticRows: 'rows',
@@ -766,8 +786,12 @@ export const TRANSLATIONS = {
     diagnosticLineCollisionsDetail:
       'Actual ink from different lines occupying the same framebuffer pixels.',
     diagnosticPageTruncation: 'Page truncation',
-    diagnosticPageTruncationDetail: (count: number, character: string) =>
-      `${enNumber(count)} firmware-tokenized text character(s) continue on the next page; no data is lost. First character on the next page: ${character || '—'}`,
+    diagnosticPageTruncationDetail: (
+      count: number,
+      character: string,
+      records = 0,
+    ) =>
+      `${enNumber(count)} firmware-tokenized text character(s) and ${enNumber(records)} record(s) continue on the next page; no data is lost. First character on the next page: ${character || '—'}`,
     diagnosticPageFits: 'All current input text fits on this page.',
     yes: 'Yes',
     no: 'No',
@@ -801,6 +825,17 @@ export const TRANSLATIONS = {
       tab: 'Tab',
     },
     diagnosticSpaceTable: 'Whitespace advance table',
+    diagnosticImageTable: 'EPUB image records',
+    diagnosticImagePath: 'Archive path',
+    diagnosticSourceSize: 'Source size',
+    diagnosticDrawSize: 'Draw size',
+    diagnosticDrawOrigin: 'Draw origin',
+    diagnosticImageOffset: 'Extra Y shift',
+    diagnosticImageMode: 'Draw path',
+    diagnosticDecodedImage: 'Decoded image',
+    diagnosticImagePlaceholder: 'Firmware placeholder',
+    diagnosticImageAutoSuppressed:
+      'A positive-height image record disables V6.3.15 whole-page Auto line redistribution.',
     diagnosticCharacter: 'Character',
     diagnosticCodePoint: 'Code point',
     diagnosticRecordCodePoint: 'Record code',

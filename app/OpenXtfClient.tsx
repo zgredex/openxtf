@@ -182,6 +182,7 @@ export default function OpenXtfClient() {
             suppressIndent: block.suppressIndent,
             syntheticBold: block.syntheticBold,
             recordPrefix: block.recordPrefix,
+            image: block.image,
           }))
         : undefined,
     [selectedEpubSection, epubTextEdited],
@@ -401,7 +402,7 @@ export default function OpenXtfClient() {
               result: profiledPreview,
             };
           }
-          rendered = renderXtfDevicePreview(
+          rendered = await renderXtfDevicePreview(
             profiledPreview.bytes,
             previewText,
             fontSize,
@@ -702,7 +703,7 @@ export default function OpenXtfClient() {
           result,
         };
         setPreview(
-          renderXtfDevicePreview(
+          await renderXtfDevicePreview(
             result.bytes,
             previewText,
             result.summary.fontSize,
@@ -769,6 +770,10 @@ export default function OpenXtfClient() {
   const diagnosticMetrics = preview?.metrics ?? null;
   const diagnosticLines = diagnosticDevice?.lines ?? [];
   const diagnosticGlyphs = diagnosticDevice?.glyphs ?? [];
+  const diagnosticImages = diagnosticDevice?.images ?? [];
+  const diagnosticPlaceholderImages = diagnosticImages.filter(
+    (image) => image.placeholder,
+  ).length;
   const diagnosticSpaces = diagnosticDevice?.spaces ?? [];
   const diagnosticWordSpace =
     diagnosticSpaces.find((space) => space.codePoint === 0x20)
@@ -1876,6 +1881,18 @@ export default function OpenXtfClient() {
                               />
                             ) : null,
                           )}
+                          {diagnosticImages.map((image) => (
+                            <span
+                              className={`diagnostic-image-box${image.placeholder ? ' is-placeholder' : ''}${image.frameClipped ? ' is-clipped' : ''}`}
+                              style={{
+                                left: `${(image.x / diagnosticDevice.width) * 100}%`,
+                                top: `${(image.y / diagnosticDevice.height) * 100}%`,
+                                width: `${(image.width / diagnosticDevice.width) * 100}%`,
+                                height: `${(image.height / diagnosticDevice.height) * 100}%`,
+                              }}
+                              key={`image-${image.index}`}
+                            />
+                          ))}
                           {diagnosticDevice.collisionDataUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
@@ -1944,6 +1961,7 @@ export default function OpenXtfClient() {
                   <div className="diagnostic-overlay-legend">
                     <span className="is-advance">{copy.overlayAdvance}</span>
                     <span className="is-ink">{copy.overlayInk}</span>
+                    <span className="is-image">{copy.overlayImages}</span>
                     <span className="is-baseline">{copy.overlayBaseline}</span>
                     <span className="is-collision">{copy.overlayCollision}</span>
                     <span className="is-break">{copy.overlayBreaks}</span>
@@ -1968,12 +1986,31 @@ export default function OpenXtfClient() {
                         </dd>
                       </div>
                       <div>
+                        <dt>{copy.diagnosticPageRecords}</dt>
+                        <dd>
+                          {diagnosticPage?.displayedRecords !== undefined &&
+                          diagnosticPage.totalRecords !== undefined
+                            ? `${formatLocaleNumber(diagnosticPage.displayedRecords, language)} / ${formatLocaleNumber(diagnosticPage.totalRecords, language)}`
+                            : '—'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>{copy.diagnosticImages}</dt>
+                        <dd>
+                          {formatLocaleNumber(diagnosticImages.length, language)} /{' '}
+                          {formatLocaleNumber(diagnosticPlaceholderImages, language)}
+                        </dd>
+                      </div>
+                      <div>
                         <dt>{copy.diagnosticPitch}</dt>
                         <dd>
                           {diagnosticLayout?.lineAdvance !== undefined &&
                           diagnosticLayout.autoDistributed &&
                           diagnosticLayout.weightedIntervals !== undefined
                             ? `756 ÷ ${formatFirmwareNumber(diagnosticLayout.weightedIntervals, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
+                            : diagnosticLayout?.autoDistributionSuppressedByImages &&
+                                diagnosticLayout.initialLineAdvance !== undefined
+                              ? `${formatFirmwareNumber(diagnosticLayout.initialLineAdvance, language)} px · ${copy.diagnosticImageAutoSuppressed}`
                             : diagnosticLayout?.lineAdvance !== undefined &&
                                 diagnosticLayout.lineSpacingFactor !== undefined
                               ? `${diagnosticHeader?.effectiveAdvanceY ?? preview.metrics.cellH} × ${formatFirmwareNumber(diagnosticLayout.lineSpacingFactor, language)} = ${formatFirmwareNumber(diagnosticLayout.lineAdvance, language)} px · f32 ${float32Hex(diagnosticLayout.lineAdvance)}`
@@ -2226,6 +2263,7 @@ export default function OpenXtfClient() {
                             ? copy.diagnosticPageTruncationDetail(
                                 diagnosticPage.remainingCharacters,
                                 diagnosticFirstHiddenLabel,
+                                diagnosticPage.remainingRecords ?? 0,
                               )
                             : copy.diagnosticPageFits
                         }
@@ -2308,6 +2346,58 @@ export default function OpenXtfClient() {
                       </table>
                     </div>
                   </section>
+
+                  {diagnosticImages.length ? (
+                    <section className="diagnostic-section">
+                      <h3>{copy.diagnosticImageTable}</h3>
+                      {diagnosticLayout?.autoDistributionSuppressedByImages ? (
+                        <p className="diagnostic-firmware-note">
+                          {copy.diagnosticImageAutoSuppressed}
+                        </p>
+                      ) : null}
+                      <div className="diagnostic-table-scroll is-compact">
+                        <table className="diagnostic-table">
+                          <thead>
+                            <tr>
+                              <th>#</th>
+                              <th>{copy.diagnosticImagePath}</th>
+                              <th>{copy.diagnosticSourceSize}</th>
+                              <th>{copy.diagnosticDrawSize}</th>
+                              <th>{copy.diagnosticDrawOrigin}</th>
+                              <th>{copy.diagnosticImageOffset}</th>
+                              <th>{copy.diagnosticImageMode}</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {diagnosticImages.map((image) => (
+                              <tr
+                                className={image.frameClipped ? 'is-danger' : undefined}
+                                key={`image-record-${image.index}`}
+                              >
+                                <td>{image.recordIndex + 1}</td>
+                                <td className="diagnostic-text-cell">
+                                  {image.archivePath || '—'}
+                                </td>
+                                <td>
+                                  {image.sourceWidth > 0 && image.sourceHeight > 0
+                                    ? `${image.sourceWidth}×${image.sourceHeight} px`
+                                    : '—'}
+                                </td>
+                                <td>{image.width}×{image.height} px</td>
+                                <td>{image.x}, {image.y} px</td>
+                                <td>+{image.drawOffsetY} px</td>
+                                <td>
+                                  {image.placeholder
+                                    ? copy.diagnosticImagePlaceholder
+                                    : copy.diagnosticDecodedImage}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  ) : null}
 
                   <section className="diagnostic-section">
                     <h3>{copy.diagnosticLineTable}</h3>

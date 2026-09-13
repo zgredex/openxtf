@@ -19,6 +19,15 @@ export type EpubBlock = {
   suppressIndent?: boolean;
   syntheticBold?: boolean;
   recordPrefix?: 0x01 | 0x1e;
+  image?: EpubImage;
+};
+
+export type EpubImage = {
+  archivePath: string;
+  mediaType: string;
+  bytes: Uint8Array;
+  width: number;
+  height: number;
 };
 
 export type EpubInlineRun = {
@@ -39,7 +48,7 @@ export type EpubBook = {
 
 const MAX_EPUB_BYTES = 100 * 1024 * 1024;
 const MAX_SECTION_CHARACTERS = 300_000;
-const EPUB_TEXT_FILE = /(?:^|\/)(?:container\.xml|[^/]+\.(?:opf|ncx|xhtml|html?|xml|css))$/i;
+const EPUB_NEEDED_FILE = /(?:^|\/)(?:container\.xml|[^/]+\.(?:opf|ncx|xhtml|html?|xml|css|png|jpe?g|bmp|xtg))$/i;
 // ELF 0x4206eb80: these are the only nested containers skipped by the stock
 // V6.3.15 EPUB tokenizer. Unsupported tags are otherwise transparent to the
 // text stream; in particular, <nav> is a recognized block tag.
@@ -191,6 +200,13 @@ export async function readEpub(file: File): Promise<EpubBook> {
       mediaType: item.getAttribute('media-type')?.trim() || '',
     });
   }
+  const mediaTypeByPath = new Map<string, string>();
+  for (const item of manifest.values()) {
+    mediaTypeByPath.set(
+      resolveArchivePath(normalizedPackagePath, item.href).toLowerCase(),
+      item.mediaType,
+    );
+  }
 
   const spineIds = elementsByLocalName(packageDocument, 'itemref')
     .filter((item) => item.getAttribute('linear')?.toLowerCase() !== 'no')
@@ -206,13 +222,21 @@ export async function readEpub(file: File): Promise<EpubBook> {
     const contentPath = resolveArchivePath(normalizedPackagePath, item.href);
     const contentFile = getArchiveFile(files, filesByLowerPath, contentPath);
     if (!contentFile) continue;
-    const content = extractReadableContent(decodeText(contentFile));
-    if (!content.blocks.some((block) => block.text.length > 0)) continue;
+    const content = extractReadableContent(decodeText(contentFile), contentPath);
+    const hydratedBlocks = hydrateImageBlocks(
+      content.blocks,
+      files,
+      filesByLowerPath,
+      mediaTypeByPath,
+    );
+    if (!hydratedBlocks.some((block) => block.text.length > 0 || block.image)) {
+      continue;
+    }
     sections.push({
       id: `${sections.length}:${contentPath}`,
       label: content.heading || chapterLabel(contentPath, sections.length + 1),
       text: content.text.slice(0, MAX_SECTION_CHARACTERS),
-      blocks: trimBlocks(content.blocks, MAX_SECTION_CHARACTERS),
+      blocks: trimBlocks(hydratedBlocks, MAX_SECTION_CHARACTERS),
       skippedEmptyBlocks: content.skippedEmptyBlocks,
     });
   }
@@ -231,7 +255,7 @@ function unzipTextFiles(data: Uint8Array) {
   return new Promise<Record<string, Uint8Array>>((resolve, reject) => {
     unzip(
       data,
-      { filter: (file) => EPUB_TEXT_FILE.test(file.name) },
+      { filter: (file) => EPUB_NEEDED_FILE.test(file.name) },
       (error, files) => {
         if (error) reject(new Error('OPENXTF_INVALID_EPUB', { cause: error }));
         else resolve(files);
@@ -263,7 +287,7 @@ function firstElementText(document: Document, localName: string) {
   return elementsByLocalName(document, localName)[0]?.textContent?.trim() || '';
 }
 
-function extractReadableContent(source: string) {
+function extractReadableContent(source: string, contentPath: string) {
   const document = new DOMParser().parseFromString(
     preserveFirmwareTextEntities(source),
     'text/html',
@@ -361,9 +385,37 @@ function extractReadableContent(source: string) {
       return;
     }
 
-    // ELF 0x420d7794 emits images as their own non-text token. Text extraction
-    // must not leak fallback/alt markup into the line records.
-    if (tag === 'img' || tag === 'image') return;
+    // ELF 0x420d7794 emits images as their own non-text token. The active text
+    // record is committed before the image, and `alt` never enters the glyph
+    // stream. The following inline text is not a new paragraph unless a real
+    // block boundary says so.
+    if (tag === 'img' || tag === 'image') {
+      commit('paragraph');
+      const href =
+        node.getAttribute('src') ||
+        node.getAttribute('xlink:href') ||
+        node.getAttribute('href') ||
+        '';
+      if (href && !/^data:/i.test(href)) {
+        blocks.push({
+          text: '',
+          tag,
+          className: node.getAttribute('class') || '',
+          breakAfter: 'soft',
+          startsParagraph: false,
+          suppressIndent: true,
+          image: {
+            archivePath: resolveArchivePath(contentPath, href),
+            mediaType: '',
+            bytes: new Uint8Array(),
+            width: 0,
+            height: 0,
+          },
+        });
+      }
+      nextStartsParagraph = false;
+      return;
+    }
 
     const togglesBold = tag === 'b' || tag === 'strong';
     const togglesItalic = tag === 'i' || tag === 'em';
@@ -704,11 +756,109 @@ function firmwareOmitsEpubCodePoint(codePoint: number) {
   );
 }
 
+function hydrateImageBlocks(
+  blocks: EpubBlock[],
+  files: Map<string, Uint8Array>,
+  filesByLowerPath: Map<string, Uint8Array>,
+  mediaTypeByPath: Map<string, string>,
+) {
+  return blocks.map((block) => {
+    if (!block.image) return block;
+    const bytes = getArchiveFile(
+      files,
+      filesByLowerPath,
+      block.image.archivePath,
+    );
+    if (!bytes) return block;
+    const dimensions = readRasterImageDimensions(bytes);
+    return {
+      ...block,
+      image: {
+        ...block.image,
+        bytes,
+        mediaType:
+          mediaTypeByPath.get(block.image.archivePath.toLowerCase()) ||
+          inferImageMediaType(block.image.archivePath),
+        width: dimensions?.width ?? 0,
+        height: dimensions?.height ?? 0,
+      },
+    };
+  });
+}
+
+function inferImageMediaType(path: string) {
+  if (/\.png$/i.test(path)) return 'image/png';
+  if (/\.jpe?g$/i.test(path)) return 'image/jpeg';
+  if (/\.bmp$/i.test(path)) return 'image/bmp';
+  if (/\.xtg$/i.test(path)) return 'application/x-xtg';
+  return 'application/octet-stream';
+}
+
+function readRasterImageDimensions(bytes: Uint8Array) {
+  if (
+    bytes.length >= 24 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[12] === 0x49 &&
+    bytes[13] === 0x48 &&
+    bytes[14] === 0x44 &&
+    bytes[15] === 0x52
+  ) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const width = view.getUint32(16, false);
+    const height = view.getUint32(20, false);
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  if (bytes.length >= 26 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const dibSize = view.getUint32(14, true);
+    const width =
+      dibSize === 12 ? view.getUint16(18, true) : Math.abs(view.getInt32(18, true));
+    const height =
+      dibSize === 12 ? view.getUint16(20, true) : Math.abs(view.getInt32(22, true));
+    return width > 0 && height > 0 ? { width, height } : null;
+  }
+
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2;
+    while (offset + 4 <= bytes.length) {
+      while (offset < bytes.length && bytes[offset] !== 0xff) offset += 1;
+      while (offset < bytes.length && bytes[offset] === 0xff) offset += 1;
+      if (offset >= bytes.length) break;
+      const marker = bytes[offset++];
+      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01) continue;
+      if (marker >= 0xd0 && marker <= 0xd7) continue;
+      if (offset + 2 > bytes.length) break;
+      const length = (bytes[offset] << 8) | bytes[offset + 1];
+      if (length < 2 || offset + length > bytes.length) break;
+      const startOfFrame =
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf);
+      if (startOfFrame && length >= 7) {
+        const height = (bytes[offset + 3] << 8) | bytes[offset + 4];
+        const width = (bytes[offset + 5] << 8) | bytes[offset + 6];
+        return width > 0 && height > 0 ? { width, height } : null;
+      }
+      offset += length;
+    }
+  }
+  return null;
+}
+
 function trimBlocks(blocks: EpubBlock[], limit: number) {
   const result: EpubBlock[] = [];
   let remaining = limit;
   for (const block of blocks) {
-    if (remaining <= 0) break;
+    if (remaining <= 0 && !block.image) break;
+    if (block.image) {
+      result.push(block);
+      continue;
+    }
     const text = block.text.slice(0, remaining);
     const inlineRuns = block.inlineRuns
       ? sliceInlineRuns(block.inlineRuns, text.length)
