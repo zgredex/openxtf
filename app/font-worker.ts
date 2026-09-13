@@ -176,6 +176,13 @@ export type FontPreviewResult = {
       placeholder: boolean;
       frameClipped: boolean;
     }>;
+    profile?: {
+      sourceCellW: number;
+      sourceCellH: number;
+      croppedInkPixels: number;
+      croppedGlyphs: number;
+      effectiveSpace: number;
+    };
     spaces?: Array<{
       codePoint: number;
       recordCodePoint?: number | null;

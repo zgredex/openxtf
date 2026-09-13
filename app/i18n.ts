@@ -213,6 +213,20 @@ export const TRANSLATIONS = {
     loadEpub: 'EPUB 불러오기',
     loadingEpub: 'EPUB 읽는 중…',
     clearEpub: 'EPUB 닫기',
+    fitPreview: '화면 잘림 자동 보정',
+    fittingPreview: '보정 확인 중…',
+    fitPreviewHelp:
+      '현재 펌웨어 페이지를 완성 XTF로 다시 검사합니다. 먼저 글자 크기와 폭을 유지한 채 셀 안의 비트맵을 최소한으로 옮기고, 잉크가 잘릴 경우에만 줄 간격 기준값을 최소한으로 늘립니다.',
+    fitPreviewWait:
+      '완성 XTF 미리보기가 준비된 뒤 다시 시도하세요.',
+    fitPreviewAlreadySafe:
+      '현재 페이지의 글리프는 480×800 프레임 안에 모두 들어갑니다.',
+    fitPreviewShiftApplied: (pixels: number) =>
+      `글자 크기와 폭은 그대로 두고 비트맵을 ${Math.abs(pixels)}px ${pixels > 0 ? '위로' : '아래로'} 옮겼습니다. 현재 페이지의 화면 잘림이 없어졌습니다.`,
+    fitPreviewLineBaseApplied: (before: number, after: number) =>
+      `글리프 픽셀을 자르지 않기 위해 줄 간격 기준값을 ${before}px에서 ${after}px로 조정했습니다. 글자 크기와 한글 폭은 바뀌지 않았습니다.`,
+    fitPreviewUnavailable:
+      '현재 셀과 레이아웃에서는 글리프 픽셀을 자르거나 글자 크기를 줄이지 않고 화면 잘림을 없앨 수 없습니다. 래스터 크기나 셀 배치를 직접 조정하세요.',
     epubSection: '미리볼 장',
     epubLoaded: (title: string, count: number) =>
       `${title} · 본문 ${count}개`,
@@ -290,6 +304,9 @@ export const TRANSLATIONS = {
     diagnosticFrameClipping: '화면에서 잘림',
     diagnosticFrameClippingDetail:
       '480×800 프레임 밖에 있어 실제 그리기에서 잘리는 글리프입니다.',
+    diagnosticProfileCrop: 'XTF 변환 중 잉크 손실',
+    diagnosticProfileCropDetail:
+      '원본 글리프를 선택한 저장 셀로 옮길 때 셀 밖으로 잘려 나간 픽셀 수와 글리프 수입니다.',
     diagnosticFallbacks: '대체 글리프 / 상자',
     diagnosticFallbacksDetail:
       '원문 글리프가 없어 U+FFFD, 물음표 또는 펌웨어 상자로 표시된 횟수입니다.',
@@ -706,6 +723,20 @@ export const TRANSLATIONS = {
     loadEpub: 'Load EPUB',
     loadingEpub: 'Reading EPUB…',
     clearEpub: 'Close EPUB',
+    fitPreview: 'Auto-fit screen clipping',
+    fittingPreview: 'Checking fit…',
+    fitPreviewHelp:
+      'Rechecks the current firmware page from the finished XTF. It first keeps glyph size and width unchanged and applies the smallest safe in-cell shift; only if that would crop ink does it minimally increase the line-spacing base.',
+    fitPreviewWait:
+      'Wait for the finished-XTF preview, then try again.',
+    fitPreviewAlreadySafe:
+      'Every glyph on the current page already fits inside the 480×800 framebuffer.',
+    fitPreviewShiftApplied: (pixels: number) =>
+      `Kept glyph size and width unchanged and moved the bitmap ${Math.abs(pixels)} px ${pixels > 0 ? 'up' : 'down'}. The current page no longer clips glyphs.`,
+    fitPreviewLineBaseApplied: (before: number, after: number) =>
+      `Changed the line-spacing base from ${before} px to ${after} px to preserve every glyph pixel. Raster size and Hangul width are unchanged.`,
+    fitPreviewUnavailable:
+      'With the current cell and layout, clipping cannot be removed without cropping glyph pixels or reducing raster size. Adjust raster size or cell placement manually.',
     epubSection: 'Section to preview',
     epubLoaded: (title: string, count: number) =>
       `${title} · ${count} reading section${count === 1 ? '' : 's'}`,
@@ -783,6 +814,9 @@ export const TRANSLATIONS = {
     diagnosticFrameClipping: 'Screen clipping',
     diagnosticFrameClippingDetail:
       'Glyphs extending outside the 480×800 framebuffer and clipped while drawing.',
+    diagnosticProfileCrop: 'Ink lost while building XTF',
+    diagnosticProfileCropDetail:
+      'Pixels and glyphs discarded outside the selected storage cell while reframing the source glyphs.',
     diagnosticFallbacks: 'Fallback glyphs / boxes',
     diagnosticFallbacksDetail:
       'Occurrences rendered as U+FFFD, a question mark, or a firmware-generated box.',

@@ -102,6 +102,10 @@ export default function OpenXtfClient() {
     key: string;
     result: FontBuildResult;
   } | null>(null);
+  const previewSourceXtfCacheRef = useRef<{
+    key: string;
+    result: FontBuildResult;
+  } | null>(null);
   const previewPrepareCacheRef = useRef<{
     key: string;
     missingCps: number[];
@@ -162,6 +166,7 @@ export default function OpenXtfClient() {
   const [notice, setNotice] = useState<Notice>(null);
   const [enlarged, setEnlarged] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [fittingPreview, setFittingPreview] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [language, setLanguage] = useState<Language>('ko');
   const copy = TRANSLATIONS[language];
@@ -228,7 +233,7 @@ export default function OpenXtfClient() {
   // Keep the exact profiled build so those changes can be rendered again
   // without rerasterizing the complete selected font scope. Every converter
   // input that can affect the finished file remains part of this key.
-  const previewXtfBuildKey = useMemo(
+  const previewSourceXtfBuildKey = useMemo(
     () =>
       JSON.stringify([
         fontKey,
@@ -245,7 +250,6 @@ export default function OpenXtfClient() {
         actualScope,
         systemFallback,
         allCharacters,
-        koreanProfileActive ? koreanSettings : null,
       ]),
     [
       fontKey,
@@ -261,8 +265,11 @@ export default function OpenXtfClient() {
       systemFallback,
       allCharacters,
       koreanProfileActive,
-      koreanSettings,
     ],
+  );
+  const previewXtfBuildKey = useMemo(
+    () => JSON.stringify([previewSourceXtfBuildKey, koreanSettings]),
+    [previewSourceXtfBuildKey, koreanSettings],
   );
   const previewPrepareKey = useMemo(
     () => JSON.stringify([fontKey, format, fontSize, allCharacters]),
@@ -373,25 +380,35 @@ export default function OpenXtfClient() {
               ? previewXtfCacheRef.current.result
               : null;
           if (!profiledPreview) {
-            localPreviewWorker = new FontWorkerClient();
-            await localPreviewWorker.probe();
-            const previewFont = await localPreviewWorker.build({
-              options: {
-                ...makeOptions(),
-                fontFile: font,
-                fallbackFiles: [...fallbacks],
-                // The worker derives its raster cell, baselines, and advances
-                // from the complete selected glyph population. A page-only
-                // subset can therefore produce different glyph records from
-                // the exported XTF. Build the exact output scope here and feed
-                // those finished bytes to the firmware preview.
-                charsText: allCharacters,
-                glyphScope: actualScope,
-                systemFallback,
-                fileNamePattern: 'preview.xtf',
-                includePreview: false,
-              },
-            });
+            let previewFont =
+              previewSourceXtfCacheRef.current?.key === previewSourceXtfBuildKey
+                ? previewSourceXtfCacheRef.current.result
+                : null;
+            if (!previewFont) {
+              localPreviewWorker = new FontWorkerClient();
+              await localPreviewWorker.probe();
+              previewFont = await localPreviewWorker.build({
+                options: {
+                  ...makeOptions(),
+                  fontFile: font,
+                  fallbackFiles: [...fallbacks],
+                  // The worker derives its raster cell, baselines, and advances
+                  // from the complete selected glyph population. A page-only
+                  // subset can therefore produce different glyph records from
+                  // the exported XTF. Build the exact output scope here and feed
+                  // those finished bytes to the firmware preview.
+                  charsText: allCharacters,
+                  glyphScope: actualScope,
+                  systemFallback,
+                  fileNamePattern: 'preview.xtf',
+                  includePreview: false,
+                },
+              });
+              previewSourceXtfCacheRef.current = {
+                key: previewSourceXtfBuildKey,
+                result: previewFont,
+              };
+            }
             if (sequence !== previewSequence.current) return;
             profiledPreview = applyKoreanX4Profile(
               previewFont,
@@ -413,6 +430,9 @@ export default function OpenXtfClient() {
               documentLanguage: epubBook?.language,
             },
           );
+          if (rendered.device) {
+            rendered.device.profile = profileReport(profiledPreview);
+          }
         } else {
           rendered = await worker.preview({
             outputFormat: format,
@@ -649,6 +669,185 @@ export default function OpenXtfClient() {
     setDeviceLayoutSettings((current) => ({ ...current, [key]: value }));
   }
 
+  async function fitCurrentPreviewToFrame() {
+    const device = preview?.device;
+    let source =
+      previewSourceXtfCacheRef.current?.key === previewSourceXtfBuildKey
+        ? previewSourceXtfCacheRef.current.result
+        : null;
+    let currentProfile =
+      previewXtfCacheRef.current?.key === previewXtfBuildKey
+        ? previewXtfCacheRef.current.result
+        : null;
+    if (!koreanProfileActive || !device?.glyphs || !font) {
+      setError(copy.fitPreviewWait);
+      return;
+    }
+
+    const verticalClipped = device.glyphs.filter((glyph) => {
+      const bounds = glyph.inkBounds;
+      return Boolean(
+        bounds &&
+          (bounds.y < 0 || bounds.y + bounds.height > device.height),
+      );
+    });
+    if (!verticalClipped.length) {
+      setError('');
+      setSuccess(copy.fitPreviewAlreadySafe);
+      return;
+    }
+
+    setFittingPreview(true);
+    setError('');
+    setSuccess('');
+    let fittingWorker: FontWorkerClient | null = null;
+    try {
+      if (!source) {
+        fittingWorker = new FontWorkerClient();
+        await fittingWorker.probe();
+        source = await fittingWorker.build({
+          options: {
+            ...makeOptions(),
+            fontFile: font,
+            fallbackFiles: [...fallbacks],
+            charsText: allCharacters,
+            glyphScope: actualScope,
+            systemFallback,
+            fileNamePattern: 'preview.xtf',
+            includePreview: false,
+          },
+        });
+        previewSourceXtfCacheRef.current = {
+          key: previewSourceXtfBuildKey,
+          result: source,
+        };
+      }
+      if (!currentProfile) {
+        currentProfile = applyKoreanX4Profile(source, koreanSettings);
+        previewXtfCacheRef.current = {
+          key: previewXtfBuildKey,
+          result: currentProfile,
+        };
+      }
+      const topOverflow = verticalClipped.reduce(
+        (maximum, glyph) =>
+          Math.max(maximum, Math.max(0, -(glyph.inkBounds?.y ?? 0))),
+        0,
+      );
+      const bottomOverflow = verticalClipped.reduce((maximum, glyph) => {
+        const bounds = glyph.inkBounds;
+        return Math.max(
+          maximum,
+          bounds ? Math.max(0, bounds.y + bounds.height - device.height) : 0,
+        );
+      }, 0);
+
+      // A single XTF has one global bitmap placement. If opposite edges are
+      // clipped simultaneously, translation cannot solve both without
+      // changing scale or cell geometry.
+      if (topOverflow === 0 || bottomOverflow === 0) {
+        const delta = bottomOverflow > 0 ? bottomOverflow : -topOverflow;
+        const candidateSettings = {
+          ...koreanSettings,
+          cropTop: koreanSettings.cropTop + delta,
+        };
+        const candidateProfile = applyKoreanX4Profile(
+          source,
+          candidateSettings,
+        );
+        const candidateCropped = candidateProfile.summary.croppedInkPixels ?? 0;
+        if (candidateCropped === 0) {
+          const candidatePreview = await renderXtfDevicePreview(
+            candidateProfile.bytes,
+            previewText,
+            candidateProfile.summary.fontSize,
+            {
+              layout: deviceLayoutSettings,
+              blocks: previewBlocks,
+              skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+              documentLanguage: epubBook?.language,
+            },
+          );
+          const candidateDevice = candidatePreview.device;
+          if (!candidateDevice) throw new Error('Missing device preview.');
+          const stillClipped = candidateDevice.glyphs?.some((glyph) => {
+            const bounds = glyph.inkBounds;
+            return Boolean(
+              bounds &&
+                (bounds.y < 0 ||
+                  bounds.y + bounds.height > candidateDevice.height),
+            );
+          });
+          if (!stillClipped) {
+            candidateDevice.profile = profileReport(candidateProfile);
+            const candidateKey = JSON.stringify([
+              previewSourceXtfBuildKey,
+              candidateSettings,
+            ]);
+            previewXtfCacheRef.current = {
+              key: candidateKey,
+              result: candidateProfile,
+            };
+            setKoreanSettings(candidateSettings);
+            setResults([]);
+            setPreview(candidatePreview);
+            setShowDiagnostics(true);
+            setSuccess(copy.fitPreviewShiftApplied(delta));
+            return;
+          }
+        }
+      }
+
+      // If translating the bitmap would remove source ink, preserve every
+      // glyph pixel and search for the smallest larger firmware line base.
+      // This can move a late record to the next page, but never squeezes the
+      // glyph, changes Hangul width, or changes the raster size.
+      const currentAdvance = koreanSettings.advanceY || koreanSettings.cellH;
+      for (
+        let candidateAdvance = currentAdvance + 1;
+        candidateAdvance <= Math.min(255, currentAdvance + 24);
+        candidateAdvance += 1
+      ) {
+        const trialBytes = currentProfile.bytes.slice();
+        trialBytes[0x0c] = candidateAdvance;
+        const candidatePreview = await renderXtfDevicePreview(
+          trialBytes,
+          previewText,
+          currentProfile.summary.fontSize,
+          {
+            layout: deviceLayoutSettings,
+            blocks: previewBlocks,
+            skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+            documentLanguage: epubBook?.language,
+          },
+        );
+        const candidateDevice = candidatePreview.device;
+        if (!candidateDevice) continue;
+        const stillClipped = candidateDevice.glyphs?.some((glyph) => {
+          const bounds = glyph.inkBounds;
+          return Boolean(
+            bounds &&
+              (bounds.y < 0 ||
+                bounds.y + bounds.height > candidateDevice.height),
+          );
+        });
+        if (stillClipped) continue;
+        updateKoreanSetting('advanceY', candidateAdvance);
+        setShowDiagnostics(true);
+        setSuccess(
+          copy.fitPreviewLineBaseApplied(currentAdvance, candidateAdvance),
+        );
+        return;
+      }
+      setError(copy.fitPreviewUnavailable);
+    } catch (reason) {
+      setError(mapWorkerError(reason as FontWorkerError, language));
+    } finally {
+      fittingWorker?.dispose();
+      setFittingPreview(false);
+    }
+  }
+
   function toggleDark() {
     const next = !dark;
     setDark(next);
@@ -697,24 +896,28 @@ export default function OpenXtfClient() {
         setBuildProgress,
       );
       if (koreanProfileActive) {
+        previewSourceXtfCacheRef.current = {
+          key: previewSourceXtfBuildKey,
+          result,
+        };
         result = applyKoreanX4Profile(result, koreanSettings);
         previewXtfCacheRef.current = {
           key: previewXtfBuildKey,
           result,
         };
-        setPreview(
-          await renderXtfDevicePreview(
-            result.bytes,
-            previewText,
-            result.summary.fontSize,
-            {
-              layout: deviceLayoutSettings,
-              blocks: previewBlocks,
-              skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
-              documentLanguage: epubBook?.language,
-            },
-          ),
+        const rendered = await renderXtfDevicePreview(
+          result.bytes,
+          previewText,
+          result.summary.fontSize,
+          {
+            layout: deviceLayoutSettings,
+            blocks: previewBlocks,
+            skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+            documentLanguage: epubBook?.language,
+          },
         );
+        if (rendered.device) rendered.device.profile = profileReport(result);
+        setPreview(rendered);
       }
       result = applyOutputFileName(result, font.name, fileNamePattern, {
         gamma,
@@ -1672,6 +1875,23 @@ export default function OpenXtfClient() {
                       {copy.clearEpub}
                     </button>
                   ) : null}
+                  {koreanProfileActive ? (
+                    <button
+                      type="button"
+                      className="secondary-btn compact-action"
+                      title={copy.fitPreviewHelp}
+                      disabled={
+                        fittingPreview ||
+                        previewLoading ||
+                        !preview?.device?.glyphs?.length
+                      }
+                      onClick={() => void fitCurrentPreviewToFrame()}
+                    >
+                      {fittingPreview
+                        ? copy.fittingPreview
+                        : copy.fitPreview}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="secondary-btn compact-action"
@@ -2242,6 +2462,16 @@ export default function OpenXtfClient() {
                         value={formatLocaleNumber(diagnosticFrameClippedGlyphs, language)}
                         detail={copy.diagnosticFrameClippingDetail}
                         tone={diagnosticFrameClippedGlyphs ? 'danger' : 'ok'}
+                      />
+                      <DiagnosticFinding
+                        title={copy.diagnosticProfileCrop}
+                        value={`${formatLocaleNumber(diagnosticDevice?.profile?.croppedInkPixels ?? 0, language)} px · ${formatLocaleNumber(diagnosticDevice?.profile?.croppedGlyphs ?? 0, language)}`}
+                        detail={copy.diagnosticProfileCropDetail}
+                        tone={
+                          diagnosticDevice?.profile?.croppedInkPixels
+                            ? 'danger'
+                            : 'ok'
+                        }
                       />
                       <DiagnosticFinding
                         title={copy.diagnosticFallbacks}
@@ -3171,6 +3401,17 @@ function applyOutputFileName(
   fileName = fileName.replace(/\.(?:xtf|bin)$/i, '') + extension;
 
   return { ...result, fileName };
+}
+
+function profileReport(result: FontBuildResult) {
+  return {
+    sourceCellW: result.summary.sourceCellW ?? result.summary.cellW,
+    sourceCellH: result.summary.sourceCellH ?? result.summary.cellH,
+    croppedInkPixels: result.summary.croppedInkPixels ?? 0,
+    croppedGlyphs: result.summary.croppedGlyphs ?? 0,
+    effectiveSpace:
+      result.summary.effectiveSpace ?? result.summary.layoutAsciiWidth ?? 0,
+  };
 }
 
 function mapWorkerError(error: FontWorkerError, language: Language) {

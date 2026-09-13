@@ -1053,6 +1053,38 @@ of the 39 × 38 storage cell. This is a default font-conversion choice, not a
 preview calibration: the preview must pass the resulting XTF through the
 firmware-derived model unchanged.
 
+### Late-record screen clipping and the safe-fit action
+
+The supplied Korean EPUB produced a useful current-build fixture. With the
+default RIDI conversion and the manual 1.2× / paragraph 1.5× reader choices,
+the selected page had no horizontal content overflow and no cross-line ink
+collision, but its last text record was drawn at Y=775 and twelve glyphs
+extended below the 480×800 framebuffer. This is not an EPUB data-loss event and
+is not repaired by narrowing Hangul or changing word spacing.
+
+The cause is verified in the explicitly selected
+`/V6.3.15-X4-EN-PROD-0905_113512.elf`. `FUN_42094f8e` compares the accumulated
+page budget with the display height minus the 17-pixel lower reserve; it does
+not query the actual nonblank rows of the final glyph. `FUN_4204507c` then
+iterates the stored 1-bpp/2-bpp cell at the requested origin and clips samples
+whose transformed framebuffer coordinates are outside the physical surface.
+The page fitter can therefore accept a late record whose glyph bitmap is
+positioned too low inside its cell.
+
+OpenXTF's one-click screen-fit action operates on the same finished XTF and
+the same current page. It first moves the serialized bitmap by only the exact
+integer overflow distance and accepts that correction only when rebuilding
+from the unprofiled source XTF does not discard any ink pixels. If
+translation would crop source ink, it preserves raster size, Hangul width, and
+every glyph pixel, then searches upward from the current `advanceY` for the
+smallest firmware line base that yields an unclipped current page. It never
+solves this condition by horizontally squeezing Korean text. Diagnostics show
+both independent failure classes: framebuffer clipping during firmware paint,
+and ink discarded earlier while reframing the source glyph into the XTF cell.
+The action is deliberately scoped to the currently rendered page and selected
+reader settings; changing the EPUB section or the device line/paragraph choice
+requires checking that resulting page again.
+
 ## Diagnostic contract
 
 Diagnostics and the preview image share the same decoded XTF records and page
