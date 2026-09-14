@@ -24,6 +24,7 @@ try {
     decodePlainXtgLevels,
     ditherFirmwareJpegOneBit,
     ditherFirmwareOneBit,
+    paintFirmwareLine,
     renderXtfDevicePreview,
   } = await import(
     pathToFileURL(bundlePath).href
@@ -73,6 +74,20 @@ try {
   );
   assert.deepEqual(Array.from(jpegDither.levels), [3, 0, 0, 3]);
   assert.equal(jpegDither.finalPhase, 4);
+  const steepLine = [];
+  paintFirmwareLine(0, 0, 1, 2, (x, y, level) => {
+    steepLine.push([x, y, level]);
+  });
+  assert.deepEqual(steepLine, [
+    [0, 0, 3],
+    [0, 1, 3],
+    [1, 2, 3],
+  ]);
+  const reversedLine = [];
+  paintFirmwareLine(1, 2, 0, 0, (x, y, level) => {
+    reversedLine.push([x, y, level]);
+  });
+  assert.deepEqual(reversedLine, steepLine);
   const profiled = applyKoreanX4Profile(
     {
       bytes: xtf,

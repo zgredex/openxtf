@@ -410,10 +410,18 @@ outline through display-vtable slot `+0x54`, then draws both corner-to-corner
 diagonals through line slot `+0x50`; a clipped region narrower than two pixels
 uses only the first diagonal. The final `+0x12c` call marks that clipped region
 for display update. OpenXTF reproduces the black outline and crossed diagonals
-in the normal non-inverted reader frame. The high-level branch and endpoints
-are verified; the concrete display object's line-pixel tie breaking is still a
-driver-level closure item and does not affect text or successfully decoded
-images.
+in the normal non-inverted reader frame.
+
+The concrete primitives are also closed in the same selected ELF. The current
+derived display vtables at `0x3c269114` and `0x3c29f2a0` both resolve slot
+`+0x50` to `DisplayDrawLineV6315` (`0x4200a67c`) and slot `+0x54` to
+`DisplayDrawRectV6315` (`0x4200a5f0`). Non-axis-aligned lines delegate through
+vtable slot `+0x30` to `DrawLinePixelsV6315` (`0x4200a3ce`). That function
+swaps axes when the line is steep, orders endpoints along the major axis,
+initializes the error to half the major-axis delta, subtracts the minor-axis
+delta after each plotted point, and advances the minor axis only when the
+result is strictly negative. OpenXTF uses the same endpoint-inclusive integer
+walk, including its tie-pixel choice.
 
 `FUN_420605ae` maps the three source raster extensions used by that worker as
 JPEG (`jpg`/`jpeg`, type 3), BMP (type 2), and PNG (type 10).

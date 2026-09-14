@@ -1958,34 +1958,35 @@ function paintFirmwareImage(
   }
 }
 
-function paintFirmwareLine(
+export function paintFirmwareLine(
   startX: number,
   startY: number,
   endX: number,
   endY: number,
   paint: (x: number, y: number, level: number) => void,
 ) {
-  // Keep this integer and endpoint-inclusive. FUN_4204d5dc proves the two
-  // line calls and their clipped endpoints; resolving the concrete display
-  // object's tie-breaking pixel walk remains a separate driver-level audit.
-  let x = startX;
-  let y = startY;
-  const deltaX = Math.abs(endX - startX);
-  const stepX = startX < endX ? 1 : -1;
-  const deltaY = -Math.abs(endY - startY);
+  // Exact DrawLinePixelsV6315 (0x4200a3ce): swap steep axes, order the
+  // major-axis endpoints, start at majorDelta / 2, then take a minor-axis
+  // step only when subtracting minorDelta makes the error strictly negative.
+  const steep = Math.abs(endY - startY) > Math.abs(endX - startX);
+  if (steep) {
+    [startX, startY] = [startY, startX];
+    [endX, endY] = [endY, endX];
+  }
+  if (startX > endX) {
+    [startX, endX] = [endX, startX];
+    [startY, endY] = [endY, startY];
+  }
+  const deltaX = endX - startX;
+  const deltaY = Math.abs(endY - startY);
+  let error = Math.trunc(deltaX / 2);
   const stepY = startY < endY ? 1 : -1;
-  let error = deltaX + deltaY;
-  while (true) {
-    paint(x, y, 3);
-    if (x === endX && y === endY) break;
-    const doubledError = error * 2;
-    if (doubledError >= deltaY) {
-      error += deltaY;
-      x += stepX;
-    }
-    if (doubledError <= deltaX) {
+  for (let x = startX; x <= endX; x += 1) {
+    paint(steep ? startY : x, steep ? x : startY, 3);
+    error -= deltaY;
+    if (error < 0) {
+      startY += stepY;
       error += deltaX;
-      y += stepY;
     }
   }
 }
