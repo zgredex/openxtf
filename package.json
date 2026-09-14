@@ -14,6 +14,7 @@
     "verify:compatibility": "node tools/verify-compatibility.mjs",
     "verify:jpeg-decoder": "node tools/verify-v6315-jpeg.mjs",
     "verify:epub": "node tools/verify-epub.mjs",
+    "verify:epub-browser": "node tools/verify-epub-browser.mjs",
     "verify:renderer": "node tools/verify-renderer.mjs",
     "deploy:pages": "npm run build && wrangler pages deploy dist/client --project-name openxtf"
   },

@@ -1384,6 +1384,25 @@ async function decodeBrowserImageLevels(
   }
   const type = firmwareRasterImageType(bytes, mediaType);
   if (type === 'unknown' || type === 'xtg') return null;
+  if (type === 'bmp') {
+    const levels = decodeFirmwareBmpLevels(
+      bytes,
+      sourceWidth,
+      sourceHeight,
+      maximumWidth,
+      maximumHeight,
+      width,
+      height,
+    );
+    return levels
+      ? {
+          levels,
+          rasterModel: 'bmp-v6315' as const,
+          decodedWidth: width,
+          decodedHeight: height,
+        }
+      : null;
+  }
   if (type === 'jpeg') {
     try {
       const fitByWidth =
@@ -1475,22 +1494,6 @@ async function decodeBrowserImageLevels(
             decodedHeight: height,
           }
         : null;
-    }
-    if (type === 'bmp') {
-      return {
-        levels: decodeFirmwareBmpLevels(
-          rgba,
-          sourceWidth,
-          sourceHeight,
-          maximumWidth,
-          maximumHeight,
-          width,
-          height,
-        ),
-        rasterModel: 'bmp-v6315' as const,
-        decodedWidth: width,
-        decodedHeight: height,
-      };
     }
     const ditherPhaseStart = jpegDitherState.phase;
     const luminance = decodeFirmwareJpegModelLuminance(
@@ -1655,8 +1658,8 @@ function decodeFirmwarePngLevels(
   return levels;
 }
 
-function decodeFirmwareBmpLevels(
-  rgba: Uint8ClampedArray,
+export function decodeFirmwareBmpLevels(
+  bytes: Uint8Array,
   sourceWidth: number,
   sourceHeight: number,
   maximumWidth: number,
@@ -1664,13 +1667,99 @@ function decodeFirmwareBmpLevels(
   cacheWidth: number,
   cacheHeight: number,
 ) {
+  // FUN_420a8d52 decodes BMP bytes itself. It accepts exactly planes=1,
+  // compression BI_RGB (0) or BI_BITFIELDS (3), dimensions no larger than
+  // 1024, and 1/4/8/16/24/32 bits per pixel. For indexed images it always
+  // seeks to a complete 2^bpp-entry BGRA palette immediately before bfOffBits.
+  if (
+    bytes.length < 34 ||
+    bytes[0] !== 0x42 ||
+    bytes[1] !== 0x4d
+  ) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const pixelOffset = view.getUint32(10, true);
+  const width = view.getInt32(18, true);
+  const signedHeight = view.getInt32(22, true);
+  const height = Math.abs(signedHeight);
+  const planes = view.getUint16(26, true);
+  const bitsPerPixel = view.getUint16(28, true);
+  const compression = view.getUint32(30, true);
+  if (
+    planes !== 1 ||
+    (compression !== 0 && compression !== 3) ||
+    width < 1 ||
+    height < 1 ||
+    width > 0x400 ||
+    height > 0x400 ||
+    width !== sourceWidth ||
+    height !== sourceHeight ||
+    ![1, 4, 8, 16, 24, 32].includes(bitsPerPixel)
+  ) return null;
+  const rowBytes = Math.ceil((width * bitsPerPixel) / 8);
+  const rowStride = (rowBytes + 3) & ~3;
+  if (
+    pixelOffset > bytes.length ||
+    rowStride * height > bytes.length - pixelOffset
+  ) return null;
+
+  let palette: Uint8Array | null = null;
+  if (bitsPerPixel <= 8) {
+    const paletteEntries = 1 << bitsPerPixel;
+    const paletteOffset = pixelOffset - paletteEntries * 4;
+    if (paletteOffset < 0 || paletteOffset + paletteEntries * 4 > bytes.length) {
+      return null;
+    }
+    palette = new Uint8Array(paletteEntries);
+    for (let index = 0; index < paletteEntries; index += 1) {
+      const offset = paletteOffset + index * 4;
+      const blue = bytes[offset];
+      const green = bytes[offset + 1];
+      const red = bytes[offset + 2];
+      palette[index] = bitsPerPixel === 1
+        ? red > 0x80 && green > 0x80 && blue > 0x80
+          ? 0xff
+          : 0
+        : (red * 0x4d + green * 0x96 + blue * 0x1d) >> 8;
+    }
+  }
+
+  const decodePixel = (rowOffset: number, x: number) => {
+    if (bitsPerPixel === 1) {
+      const index = (bytes[rowOffset + (x >> 3)] >> (7 - (x & 7))) & 1;
+      return palette?.[index] ?? 0;
+    }
+    if (bitsPerPixel === 4) {
+      const packed = bytes[rowOffset + (x >> 1)];
+      const index = x & 1 ? packed & 0x0f : packed >> 4;
+      return palette?.[index] ?? 0;
+    }
+    if (bitsPerPixel === 8) {
+      return palette?.[bytes[rowOffset + x]] ?? 0;
+    }
+    if (bitsPerPixel === 16) {
+      const offset = rowOffset + x * 2;
+      const low = bytes[offset];
+      const high = bytes[offset + 1];
+      const red = compression === 0 ? (high << 1) & 0xf8 : high & 0xf8;
+      const green = compression === 0
+        ? ((low >> 2) & 0x38) | ((high & 0x03) << 6)
+        : ((low >> 3) & 0x1c) | ((high & 0x07) << 5);
+      const blue = low & 0x1f;
+      return (red * 0x4d + green * 0x96 + blue * 0xe8) >> 8;
+    }
+    const offset = rowOffset + x * (bitsPerPixel >> 3);
+    const blue = bytes[offset];
+    const green = bytes[offset + 1];
+    const red = bytes[offset + 2];
+    return (red * 0x4d + green * 0x96 + blue * 0x1d) >> 8;
+  };
+
   const luminance = new Uint8Array(cacheWidth * cacheHeight);
   for (let y = 0; y < cacheHeight; y += 1) {
+    const sourceY = signedHeight < 0 ? y : height - 1 - y;
+    const rowOffset = pixelOffset + sourceY * rowStride;
     for (let x = 0; x < cacheWidth; x += 1) {
-      luminance[y * cacheWidth + x] = firmwareOpaqueLuminance(
-        rgba,
-        y * sourceWidth + x,
-      );
+      luminance[y * cacheWidth + x] = decodePixel(rowOffset, x);
     }
   }
   const originX = sourceWidth <= maximumWidth

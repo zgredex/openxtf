@@ -21,6 +21,7 @@ try {
 
   const {
     applyKoreanX4Profile,
+    decodeFirmwareBmpLevels,
     decodePlainXtgLevels,
     ditherFirmwareJpegOneBit,
     ditherFirmwareOneBit,
@@ -59,6 +60,42 @@ try {
     [0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3, 0, 3],
   );
   assert.equal(decodePlainXtgLevels(xtg, 8, 2), null);
+  const bmpRows = [
+    [0, 1],
+    [1, 0],
+  ];
+  for (const bitsPerPixel of [1, 4, 8]) {
+    const bmp = makeBmpFixture({ bitsPerPixel, rows: bmpRows });
+    assert.deepEqual(
+      Array.from(decodeFirmwareBmpLevels(bmp, 2, 2, 2, 2, 2, 2)),
+      [3, 0, 0, 3],
+    );
+  }
+  for (const topDown of [false, true]) {
+    const bmp = makeBmpFixture({ bitsPerPixel: 24, rows: bmpRows, topDown });
+    assert.deepEqual(
+      Array.from(decodeFirmwareBmpLevels(bmp, 2, 2, 2, 2, 2, 2)),
+      [3, 0, 0, 3],
+    );
+  }
+  const bmp32 = makeBmpFixture({ bitsPerPixel: 32, rows: bmpRows });
+  assert.deepEqual(
+    Array.from(decodeFirmwareBmpLevels(bmp32, 2, 2, 2, 2, 2, 2)),
+    [3, 0, 0, 3],
+  );
+  for (const compression of [0, 3]) {
+    const bmp = makeBmpFixture({ bitsPerPixel: 16, rows: bmpRows, compression });
+    assert.deepEqual(
+      Array.from(decodeFirmwareBmpLevels(bmp, 2, 2, 2, 2, 2, 2)),
+      [3, 0, 0, 3],
+    );
+  }
+  const unsupportedBmp = makeBmpFixture({ bitsPerPixel: 8, rows: bmpRows });
+  new DataView(unsupportedBmp.buffer).setUint32(30, 1, true);
+  assert.equal(
+    decodeFirmwareBmpLevels(unsupportedBmp, 2, 2, 2, 2, 2, 2),
+    null,
+  );
   assert.deepEqual(
     Array.from(ditherFirmwareOneBit(new Uint8Array([119]), 1, 1)),
     [3],
@@ -595,6 +632,63 @@ function makeFixtureXtg() {
   view.setUint16(6, 2, true);
   view.setUint32(10, 4, true);
   bytes.set([0xaa, 0x80, 0x55, 0x00], 22);
+  return bytes;
+}
+
+function makeBmpFixture({
+  bitsPerPixel,
+  rows,
+  compression = 0,
+  topDown = false,
+}) {
+  const height = rows.length;
+  const width = rows[0].length;
+  const paletteEntries = bitsPerPixel <= 8 ? 1 << bitsPerPixel : 0;
+  const paletteBytes = paletteEntries * 4;
+  const pixelOffset = 54 + paletteBytes;
+  const rowStride = (Math.ceil((width * bitsPerPixel) / 8) + 3) & ~3;
+  const bytes = new Uint8Array(pixelOffset + rowStride * height);
+  const view = new DataView(bytes.buffer);
+  bytes.set([0x42, 0x4d], 0);
+  view.setUint32(2, bytes.length, true);
+  view.setUint32(10, pixelOffset, true);
+  view.setUint32(14, 40, true);
+  view.setInt32(18, width, true);
+  view.setInt32(22, topDown ? -height : height, true);
+  view.setUint16(26, 1, true);
+  view.setUint16(28, bitsPerPixel, true);
+  view.setUint32(30, compression, true);
+  view.setUint32(34, rowStride * height, true);
+  if (paletteEntries) {
+    bytes.set([0xff, 0xff, 0xff, 0x00], 54 + 4);
+  }
+  for (let visualY = 0; visualY < height; visualY += 1) {
+    const fileY = topDown ? visualY : height - 1 - visualY;
+    const rowOffset = pixelOffset + fileY * rowStride;
+    for (let x = 0; x < width; x += 1) {
+      const white = rows[visualY][x] !== 0;
+      if (bitsPerPixel === 1) {
+        if (white) bytes[rowOffset + (x >> 3)] |= 0x80 >> (x & 7);
+      } else if (bitsPerPixel === 4) {
+        if (white) bytes[rowOffset + (x >> 1)] |= x & 1 ? 0x01 : 0x10;
+      } else if (bitsPerPixel === 8) {
+        bytes[rowOffset + x] = white ? 1 : 0;
+      } else if (bitsPerPixel === 16) {
+        view.setUint16(
+          rowOffset + x * 2,
+          white ? (compression === 0 ? 0x7fff : 0xffff) : 0,
+          true,
+        );
+      } else {
+        const offset = rowOffset + x * (bitsPerPixel >> 3);
+        const value = white ? 0xff : 0;
+        bytes[offset] = value;
+        bytes[offset + 1] = value;
+        bytes[offset + 2] = value;
+        if (bitsPerPixel === 32) bytes[offset + 3] = 0;
+      }
+    }
+  }
   return bytes;
 }
 

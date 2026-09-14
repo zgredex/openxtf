@@ -288,11 +288,6 @@ function firstElementText(document: Document, localName: string) {
 }
 
 function extractReadableContent(source: string, contentPath: string) {
-  const document = new DOMParser().parseFromString(
-    preserveFirmwareTextEntities(source),
-    'text/html',
-  );
-  const body = document.body;
   const blocks: EpubBlock[] = [];
   let skippedEmptyBlocks = 0;
   let pendingRuns: EpubInlineRun[] = [];
@@ -309,6 +304,8 @@ function extractReadableContent(source: string, contentPath: string) {
   let parserHeadingCenter = false;
   let parserClassCenter: { tag: 'p' | 'div'; depth: number } | null = null;
   let nextRawRunId = 0;
+  const blockContext: Array<{ tag: string; className: string }> = [];
+  const ignoredContainers: string[] = [];
 
   const commit = (
     breakAfter: EpubBlock['breakAfter'],
@@ -342,15 +339,8 @@ function extractReadableContent(source: string, contentPath: string) {
     if (breakAfter === 'paragraph') nextStartsParagraph = true;
   };
 
-  const visit = (
-    node: Node,
-    context: {
-      tag: string;
-      className: string;
-    },
-  ) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const text = node.nodeValue || '';
+  const appendText = (text: string) => {
+      const context = blockContext.at(-1) ?? { tag: 'body', className: '' };
       const hasVisibleText = /[^\t\n\r \u00a0]/u.test(text);
       if (!pendingHasVisibleText && hasVisibleText) {
         const center = parserHeadingCenter || parserClassCenter !== null;
@@ -374,33 +364,48 @@ function extractReadableContent(source: string, contentPath: string) {
         nextRawRunId,
       );
       nextRawRunId += 1;
-      return;
-    }
-    if (!(node instanceof Element)) return;
-    const tag = node.localName.toLowerCase();
-    if (OMIT_ELEMENTS.has(tag)) return;
+  };
 
-    if (tag === 'br' || tag === 'hr') {
+  for (const token of scanFirmwareMarkup(source)) {
+    if (token.kind === 'text') {
+      if (!ignoredContainers.length) appendText(token.text);
+      continue;
+    }
+    const { tag } = token;
+    if (ignoredContainers.length) {
+      if (!token.closing && !token.selfClosing && OMIT_ELEMENTS.has(tag)) {
+        ignoredContainers.push(tag);
+      } else if (token.closing && ignoredContainers.at(-1) === tag) {
+        ignoredContainers.pop();
+      }
+      continue;
+    }
+    if (OMIT_ELEMENTS.has(tag)) {
+      if (!token.closing && !token.selfClosing) ignoredContainers.push(tag);
+      continue;
+    }
+
+    if (!token.closing && (tag === 'br' || tag === 'hr')) {
       commit('soft', true);
-      return;
+      continue;
     }
 
     // ELF 0x420d7794 emits images as their own non-text token. The active text
     // record is committed before the image, and `alt` never enters the glyph
     // stream. The following inline text is not a new paragraph unless a real
     // block boundary says so.
-    if (tag === 'img' || tag === 'image') {
+    if (!token.closing && (tag === 'img' || tag === 'image')) {
       commit('paragraph');
       const href =
-        node.getAttribute('src') ||
-        node.getAttribute('xlink:href') ||
-        node.getAttribute('href') ||
+        token.attributes.get('src') ||
+        token.attributes.get('xlink:href') ||
+        token.attributes.get('href') ||
         '';
       if (href && !/^data:/i.test(href)) {
         blocks.push({
           text: '',
           tag,
-          className: node.getAttribute('class') || '',
+          className: token.attributes.get('class') || '',
           breakAfter: 'soft',
           startsParagraph: false,
           suppressIndent: true,
@@ -414,41 +419,42 @@ function extractReadableContent(source: string, contentPath: string) {
         });
       }
       nextStartsParagraph = false;
-      return;
+      continue;
     }
 
     const togglesBold = tag === 'b' || tag === 'strong';
     const togglesItalic = tag === 'i' || tag === 'em';
-    if (togglesBold) parserBold = true;
-    if (togglesItalic) parserItalic = true;
-
     const isBlock = BLOCK_ELEMENTS.has(tag);
-    if (isBlock) commit('paragraph');
-
     const headingOrCenterTag = tag === 'center' || /^h[1-6]$/.test(tag);
-    if (headingOrCenterTag) parserHeadingCenter = true;
-
-    // ELF 0x4206ef9e keeps recognized p/div class centering in one global
-    // selector/depth pair. Only nested elements of the same tag increment the
-    // depth, even if the nested element has no recognized class. A different
-    // p/div tag does not affect the active pair.
     const isClassContainer = tag === 'p' || tag === 'div';
-    if (isClassContainer) {
-      const classCentered = Array.from(node.classList).some((name) =>
-        CENTER_CLASS_KEYWORDS.has(name.toLowerCase()),
-      );
-      if (!parserClassCenter && classCentered) {
-        parserClassCenter = { tag, depth: 1 };
-      } else if (parserClassCenter?.tag === tag) {
-        parserClassCenter.depth += 1;
-      }
-    }
 
-    const nextContext = {
-      tag: isBlock ? tag : context.tag,
-      className: isBlock ? node.getAttribute('class') || '' : context.className,
-    };
-    for (const child of node.childNodes) visit(child, nextContext);
+    if (!token.closing) {
+      if (togglesBold) parserBold = true;
+      if (togglesItalic) parserItalic = true;
+      if (isBlock) commit('paragraph');
+      if (headingOrCenterTag) parserHeadingCenter = true;
+
+      // ELF 0x4206ef9e keeps recognized p/div class centering in one global
+      // selector/depth pair. Only a nested element of the same tag increments
+      // the depth, even if that nested element has no recognized class.
+      if (isClassContainer) {
+        const classCentered = firmwareClassIsCentered(
+          token.attributes.get('class') || '',
+        );
+        if (!parserClassCenter && classCentered) {
+          parserClassCenter = { tag, depth: 1 };
+        } else if (parserClassCenter?.tag === tag) {
+          parserClassCenter.depth += 1;
+        }
+      }
+      if (isBlock) {
+        blockContext.push({
+          tag,
+          className: token.attributes.get('class') || '',
+        });
+      }
+      if (!token.selfClosing) continue;
+    }
 
     if (isBlock) commit('paragraph', true);
     if (headingOrCenterTag) parserHeadingCenter = false;
@@ -461,26 +467,159 @@ function extractReadableContent(source: string, contentPath: string) {
     // style stack (for example, </strong> also clears an outer <b> state).
     if (togglesBold) parserBold = false;
     if (togglesItalic) parserItalic = false;
-  };
-
-  for (const child of body.childNodes) {
-    visit(child, {
-      tag: 'body',
-      className: '',
-    });
+    if (isBlock) {
+      for (let index = blockContext.length - 1; index >= 0; index -= 1) {
+        if (blockContext[index].tag === tag) {
+          blockContext.splice(index, 1);
+          break;
+        }
+      }
+    }
   }
   commit('text-end');
   if (blocks.length) blocks[blocks.length - 1].breakAfter = 'text-end';
 
   const heading =
-    body.querySelector('h1, h2, h3')?.textContent?.replace(/\s+/g, ' ').trim() ||
-    document.title.trim();
+    blocks.find((block) => /^h[1-3]$/.test(block.tag))?.text || '';
   return {
     heading,
     text: blocks.map((block) => block.text).join('\n\n'),
     blocks,
     skippedEmptyBlocks,
   };
+}
+
+type FirmwareMarkupToken =
+  | { kind: 'text'; text: string }
+  | {
+      kind: 'tag';
+      tag: string;
+      closing: boolean;
+      selfClosing: boolean;
+      attributes: Map<string, string>;
+    };
+
+function scanFirmwareMarkup(source: string): FirmwareMarkupToken[] {
+  const tokens: FirmwareMarkupToken[] = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const opening = source.indexOf('<', cursor);
+    if (opening < 0) {
+      if (cursor < source.length) {
+        tokens.push({ kind: 'text', text: source.slice(cursor) });
+      }
+      break;
+    }
+    if (opening > cursor) {
+      tokens.push({ kind: 'text', text: source.slice(cursor, opening) });
+    }
+    if (source.startsWith('<!--', opening)) {
+      const end = source.indexOf('-->', opening + 4);
+      cursor = end < 0 ? source.length : end + 3;
+      continue;
+    }
+    if (source.startsWith('<![CDATA[', opening)) {
+      const end = source.indexOf(']]>', opening + 9);
+      const contentEnd = end < 0 ? source.length : end;
+      tokens.push({ kind: 'text', text: source.slice(opening + 9, contentEnd) });
+      cursor = end < 0 ? source.length : end + 3;
+      continue;
+    }
+    const end = firmwareTagEnd(source, opening + 1);
+    if (end < 0) {
+      tokens.push({ kind: 'text', text: source.slice(opening) });
+      break;
+    }
+    const raw = source.slice(opening + 1, end);
+    cursor = end + 1;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed[0] === '!' || trimmed[0] === '?') continue;
+    let index = 0;
+    let closing = false;
+    if (trimmed[index] === '/') {
+      closing = true;
+      index += 1;
+      while (/\s/.test(trimmed[index] || '')) index += 1;
+    }
+    const nameStart = index;
+    while (index < trimmed.length && !/[\s/>]/.test(trimmed[index])) index += 1;
+    if (index === nameStart) {
+      tokens.push({ kind: 'text', text: source.slice(opening, end + 1) });
+      continue;
+    }
+    const tag = trimmed.slice(nameStart, index).toLowerCase();
+    const selfClosing = !closing && /\/\s*$/.test(trimmed);
+    tokens.push({
+      kind: 'tag',
+      tag,
+      closing,
+      selfClosing,
+      attributes: closing
+        ? new Map<string, string>()
+        : parseFirmwareAttributes(trimmed.slice(index)),
+    });
+  }
+  return tokens;
+}
+
+function firmwareTagEnd(source: string, start: number) {
+  let quote = '';
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (character === quote) quote = '';
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === '>') {
+      return index;
+    }
+  }
+  return -1;
+}
+
+function parseFirmwareAttributes(source: string) {
+  const attributes = new Map<string, string>();
+  let cursor = 0;
+  while (cursor < source.length) {
+    while (/\s/.test(source[cursor] || '')) cursor += 1;
+    if (cursor >= source.length || source[cursor] === '/') break;
+    const nameStart = cursor;
+    while (cursor < source.length && !/[\s=/>]/.test(source[cursor])) cursor += 1;
+    if (cursor === nameStart) {
+      cursor += 1;
+      continue;
+    }
+    const name = source.slice(nameStart, cursor).toLowerCase();
+    while (/\s/.test(source[cursor] || '')) cursor += 1;
+    let value = '';
+    if (source[cursor] === '=') {
+      cursor += 1;
+      while (/\s/.test(source[cursor] || '')) cursor += 1;
+      const quote = source[cursor] === '"' || source[cursor] === "'"
+        ? source[cursor++]
+        : '';
+      const valueStart = cursor;
+      if (quote) {
+        while (cursor < source.length && source[cursor] !== quote) cursor += 1;
+      } else {
+        while (cursor < source.length && !/[\s/>]/.test(source[cursor])) cursor += 1;
+      }
+      value = source.slice(valueStart, cursor);
+      if (quote && source[cursor] === quote) cursor += 1;
+    }
+    if (!attributes.has(name)) attributes.set(name, decodeFirmwareAttribute(value));
+  }
+  return attributes;
+}
+
+function decodeFirmwareAttribute(value: string) {
+  return decodeFirmwareEntities(value).map((entry) => entry.character).join('');
+}
+
+function firmwareClassIsCentered(className: string) {
+  return className.split(/[\t\n\r ]+/).some(
+    (name) => CENTER_CLASS_KEYWORDS.has(name.toLowerCase()),
+  );
 }
 
 function appendInlineRun(
@@ -590,37 +729,6 @@ export function normalizeFirmwareInlineRuns(runs: EpubInlineRun[]) {
         run.italic,
         activeTextToken,
       );
-    }
-  }
-  return output;
-}
-
-function preserveFirmwareTextEntities(source: string) {
-  // DOMParser would otherwise apply the browser's much larger HTML entity
-  // table before ELF 0x420d7794 is emulated. Escape ampersands only in text
-  // content so attributes and tag syntax remain available to the DOM walker.
-  let output = '';
-  let insideTag = false;
-  let quote = '';
-  for (const character of source) {
-    if (insideTag) {
-      output += character;
-      if (quote) {
-        if (character === quote) quote = '';
-      } else if (character === '"' || character === "'") {
-        quote = character;
-      } else if (character === '>') {
-        insideTag = false;
-      }
-      continue;
-    }
-    if (character === '<') {
-      insideTag = true;
-      output += character;
-    } else if (character === '&') {
-      output += '&amp;';
-    } else {
-      output += character;
     }
   }
   return output;

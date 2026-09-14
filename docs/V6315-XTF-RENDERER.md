@@ -362,6 +362,16 @@ In particular, `nav` is a recognized block tag and is not part of that ignored
 container set. Images are handled by a separate non-text token path; they must
 not be approximated as ordinary styled text.
 
+OpenXTF scans the original XHTML byte-decoded source in tag order. It does not
+build a browser HTML tree first. This is necessary because `DOMParser` repairs
+legacy or invalid nesting before script can observe it; for example, Firefox
+would split a `<center>` nested directly inside `<p>`, while the firmware's
+streaming tokenizer sees those tags in their original order and keeps one
+record. `tools/verify-epub-browser.mjs` loads a synthetic zipped EPUB in a real
+Firefox process and pins ignored containers, block and soft breaks, class and
+literal centering, nested style-state bytes, image separation, empty-block
+omission, and that source-order behavior.
+
 That separation is explicit in `FUN_420d866e`: tokenizer token type 5 sets
 result byte `+4` and returns without appending ordinary text. The actual page
 builder is `ProcessEpubContentV6315` at ELF `0x420ee200`; it consumes an image
@@ -512,9 +522,13 @@ OpenXTF must never turn image `alt` text into XTF glyphs or invent a CSS-sized
 blank line. Image record construction, page-fit integration, cached-size
 selection, centering, independent draw-Y adjustment, one-bit cache format, and
 the luminance/threshold core are traced. OpenXTF now decodes plain unexpanded
-XTG exactly, models BMP crop geometry, and applies the current PNG fixed-point
-downscale/averaging, white alpha composition, custom error propagation, and
-ordered threshold after the browser returns source RGBA pixels. For JPEG it
+XTG exactly and decodes the V6.3.15 BMP input bytes without browser image or
+color-management behavior. The native BMP path pins 1/4/8-bit indexed,
+16-bit BI_RGB/BI_BITFIELDS, 24/32-bit, bottom-up/top-down, palette, row-stride,
+crop, centering, luminance, and rejection behavior. OpenXTF applies the current
+PNG fixed-point downscale/averaging, white alpha composition, custom error
+propagation, and ordered threshold after the browser returns source RGBA
+pixels. Native PNG byte decoding remains the image-raster gap. For JPEG it
 loads a 14 KB WebAssembly build from pinned TJpgDec v1.0.8/R0.03 source and
 applies the configuration, grayscale saturation modification, scale selection,
 and per-MCU resampler verified above. `JpegOutputCallbackV6315` uses an
@@ -1194,18 +1208,18 @@ plausible.
 | --- | --- | --- | --- | --- |
 | XTF recognition, header, range lookup, ASCII table, 1/2-bpp records | `0x4205ba98`, `0x420425b2`, `0x420014b2`, `0x420027d2` | Implemented from finished downloaded XTF bytes | Controlled XTF header/space fixture and stable output hashes | Closed for accepted XTF v2 files |
 | Direct glyph, U+FFFD, `?`, generated-box fallback order | `0x420470e4` and lookup helpers | Implemented per painted code point | Missing-Hangul → `?` fixture | Closed for Korean/Latin |
-| EPUB tokenizer, block table, ignored containers, whitespace, entities and invisible controls | `0x4206eb80`, `0x4206ebfc`, `0x4206e84e`, `0x420d7794` | Implemented in `app/epub.ts` | `tools/verify-epub.mjs` pins whitespace, NBSP, entities and control omission | Closed for the tested Korean/Latin token classes; DOM tag-state fixtures remain to be added |
+| EPUB tokenizer, block table, ignored containers, whitespace, entities and invisible controls | `0x4206eb80`, `0x4206ebfc`, `0x4206e84e`, `0x420d7794` | Sequential source scanner implemented in `app/epub.ts`; browser tree repair is bypassed | Unit fixtures plus a synthetic zipped EPUB in real Firefox pin whitespace, entities, ignored content and source-order tag state | Closed for the tested Korean/Latin token and tag classes |
 | Inline bold/italic bytes and mathematical-alphanumeric remapping | `0x4206e6e6`, `0x420d7794`, `0x420470e4` | Serialized state is retained for diagnostics and consumed without changing XTF ink | Mathematical bold/italic byte fixture | Closed for Korean/Latin |
-| Empty blocks and automatic/manual/paragraph/text/source/page endings | `0x4206ebfc`, `0x420713a0`, `0x4205702c`, composer/painter calls | Five distinct endings modeled | Record suffix, source-end and pagination fixtures | Closed for modeled text records; complete tag-state EPUB fixture remains |
+| Empty blocks and automatic/manual/paragraph/text/source/page endings | `0x4206ebfc`, `0x420713a0`, `0x4205702c`, composer/painter calls | Five distinct endings modeled | Record suffix, source-end, pagination and in-browser EPUB fixtures | Closed for the verified Korean/Latin path |
 | EPUB line splitting and the second painter-width gate | `0x420d866e`, `0x420701b8`, `0x42071de6`, `0x420719aa` | Layout and paint advances are separate; trailing source spaces are consumed but not painted | Exact-width, NBSP refit, opening/closing punctuation and Hangul full-width fixtures | Closed for the verified Korean/Latin units and punctuation paths |
 | Language dictionaries, explicit soft hyphen and legal-break guards | `0x4204baa4`, `0x4204baf2`, `0x42070402`, punctuation helpers | Exact packed V6.3.15 dictionaries and guards implemented | English, Polish, Russian, Korean-none, soft-hyphen and visible inserted-hyphen fixtures | Closed for the supported Korean/Latin dictionary path |
 | XTF glyph paint advance and bitmap clipping | `0x420470e4`, XTF lookup/blit helpers | Finished records, signed X offsets and framebuffer clipping modeled | Screen-bottom clipping and safe crop-shift fixtures | Closed for Korean/Latin glyphs |
 | Wrap+Align/right/left and ordinary-Hangul versus CJK-state distribution | `0x42042076`, `0x420dcddc` | Split, natural paint and integer distribution remain separate stages | Hangul-space modes, CJK remainder, and one/two trailing-Latin fixtures | Closed for the verified Korean/Latin/CJK-state branches |
 | Manual/Auto line steps, paragraph ratio, indentation, capacity and origin conversion | `0x420570dc`, `0x4205702c`, `0x420dcddc` | Binary32 arithmetic, 22…778 origin span and transition/page-fit modes implemented | Manual, Auto, paragraph-ratio and late-line fixtures | Closed for current Korean defaults and exposed runtime choices |
-| Heading/literal-center/class-center handling and ignored CSS | `0x4206ec7e`, `0x4206ef9e`, `0x4207153e`, `0x420d9e84`, `0x420dcddc` | Exact class set, record prefixes, centering and one-pixel heading pass implemented | No complete XHTML tag-state fixture yet | Implemented, fixture gap remains |
+| Heading/literal-center/class-center handling and ignored CSS | `0x4206ec7e`, `0x4206ef9e`, `0x4207153e`, `0x420d9e84`, `0x420dcddc` | Exact class set, record prefixes, centering and one-pixel heading pass implemented | Synthetic zipped EPUB in real Firefox covers class/literal center, headings, nested styles and ignored inline CSS | Closed for the verified Korean/Latin tag-state path |
 | Image record sizing, page fit, placement and placeholder | composer image branch, `0x420942d2`, `0x42073b4c`, `0x420943b4`, `0x42054d8a` | Separate image records and transitions modeled | Manual/Auto placeholder fixture | Closed for record/layout behavior |
 | Native XTG and JPEG cache raster | `0x4205e08c`, `0x42055f5c`, `0x42069688`, `0x403808a4` | XTG exact; pinned TJpgDec WASM plus V6.3.15 resample/dither path | XTG bit fixture, JPEG decoder fixture and stable hashes | Closed from a fresh JPEG-cache phase; existing-device phase history is explicitly reported |
-| PNG and BMP source decoding before verified firmware scaling/dither/crop | PNG row callbacks, `0x42053846`, BMP branch of `0x420cdf7e` | Firmware geometry and pixel math implemented after browser RGBA decode | Core dither thresholds are pinned | Open: browser decoding/color-management of unusual PNG/BMP inputs is not yet byte-identical to the firmware decoder |
+| PNG and BMP source decoding before verified firmware scaling/dither/crop | PNG row callbacks, `0x42053846`, `FUN_420a8d52`, `0x420cdf7e` | BMP is decoded natively; PNG still uses browser RGBA before verified firmware scaling/dither | BMP bit-depth/orientation/compression fixtures and core dither thresholds | BMP closed for accepted V6.3.15 inputs; native PNG byte decoding remains open |
 | Display line/rectangle raster before panel refresh | vtables `0x3c269114`/`0x3c29f2a0`, `0x4200a67c`, `0x4200a5f0`, `0x4200a3ce` | Strict-tie Adafruit-style line walk implemented | Forward/reverse steep tie fixture | Closed for logical framebuffer primitives |
 | Physical e-ink waveform, ghosting and photographed contrast | Outside the logical framebuffer contract | Intentionally not simulated | Not applicable | Out of scope; never used to tune typography |
 | Tibetan and Thai shaping/cluster branches | Present in firmware | Partially traced | Not complete | Deliberately deferred at the user's direction |
