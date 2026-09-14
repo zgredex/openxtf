@@ -405,6 +405,15 @@ width and height. The painter centers that finished width inside the current
 content span and `FUN_4207c836` draws it at the requested origin. If no usable
 cache entry is available, the alternate `FUN_4204d5dc` branch draws a clipped
 rectangular placeholder; it does not substitute EPUB `alt` text.
+`FUN_4204d5dc` clips the requested box to the physical framebuffer, draws its
+outline through display-vtable slot `+0x54`, then draws both corner-to-corner
+diagonals through line slot `+0x50`; a clipped region narrower than two pixels
+uses only the first diagonal. The final `+0x12c` call marks that clipped region
+for display update. OpenXTF reproduces the black outline and crossed diagonals
+in the normal non-inverted reader frame. The high-level branch and endpoints
+are verified; the concrete display object's line-pixel tie breaking is still a
+driver-level closure item and does not affect text or successfully decoded
+images.
 
 `FUN_420605ae` maps the three source raster extensions used by that worker as
 JPEG (`jpg`/`jpeg`, type 3), BMP (type 2), and PNG (type 10).

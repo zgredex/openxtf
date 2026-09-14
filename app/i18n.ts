@@ -515,6 +515,7 @@ export const TRANSLATIONS = {
     generationError: '글꼴 생성에 실패했습니다.',
     cropInkError:
       '설정한 대상 셀로 자르면 글리프 잉크가 손실됩니다. 자르기 위치나 셀 크기를 조정하거나 잉크 손실 방지를 끄세요.',
+    githubLink: 'GitHub에서 소스 코드 보기',
     fontAttribution:
       '이 페이지는 리디주식회사에서 제공한 리디바탕 폰트를 사용합니다.',
   },
@@ -1028,6 +1029,7 @@ export const TRANSLATIONS = {
     generationError: 'Font generation failed.',
     cropInkError:
       'The selected target cell would remove glyph ink. Adjust the crop position or cell size, or turn off ink protection.',
+    githubLink: 'View source on GitHub',
     fontAttribution:
       'This page uses the Ridi Batang font provided by Ridi Corporation.',
   },

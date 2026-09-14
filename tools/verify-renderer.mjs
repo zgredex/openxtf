@@ -171,6 +171,103 @@ try {
   assert.equal(automaticOneX.device.layout.recordsRemovedByPageFit, 1);
   assert.equal(automaticOneX.device.lines.at(-1).top, 778);
 
+  // V6.3.15 admits a late manual-spacing record by its line budget, then the
+  // bitmap blitter clips any occupied rows beyond the physical framebuffer.
+  // This mirrors the supplied Korean EPUB without keeping copyrighted book
+  // content as a fixture. Reframing the finished glyphs upward preserves the
+  // raster and both layout widths while removing the clipping.
+  const tallXtf = makeFixtureXtf({ cellH: 24, fillEveryRow: true });
+  const tallBuild = {
+    bytes: tallXtf,
+    fileName: 'tall-fixture.xtf',
+    previewDataUrl: '',
+    summary: {
+      version: '1.5',
+      fontSize: 29,
+      bpp: 1,
+      cellW: 1,
+      cellH: 24,
+      glyphCount: 96,
+      requestedCount: 96,
+      missingCount: 0,
+      systemFallbackCount: 0,
+      rangeCount: 2,
+      bytesPerGlyph: 26,
+      fileSize: tallXtf.length,
+    },
+  };
+  const tallSettings = {
+    cellW: 39,
+    cellH: 38,
+    cropLeft: 0,
+    cropTop: 0,
+    advanceY: 38,
+    fullWidth: 28,
+    asciiWidth: 18,
+    spaceWidth: 9,
+    ascender: 7,
+    descender: 0,
+    strictCrop: false,
+  };
+  const lateLineBlocks = Array.from({ length: 15 }, (_, index) => ({
+    text: 'A',
+    tag: 'p',
+    className: '',
+    breakAfter:
+      index < 5 ? 'paragraph' : index === 14 ? 'text-end' : 'soft',
+    startsParagraph: false,
+    suppressIndent: true,
+  }));
+  const lateProfile = applyKoreanX4Profile(tallBuild, tallSettings);
+  const latePreview = await renderXtfDevicePreview(
+    lateProfile.bytes,
+    '',
+    29,
+    {
+      blocks: lateLineBlocks,
+      layout: {
+        lineSpacing: 1.2,
+        paragraphRatio: 1.5,
+        indentChars: 2,
+        alignMode: 'left',
+      },
+    },
+  );
+  assert.equal(latePreview.device.lines.at(-1).top, 775);
+  assert.equal(
+    latePreview.device.glyphs.filter((glyph) => glyph.frameClipped).length,
+    1,
+  );
+
+  const safeProfile = applyKoreanX4Profile(tallBuild, {
+    ...tallSettings,
+    cropTop: 7,
+  });
+  const safePreview = await renderXtfDevicePreview(
+    safeProfile.bytes,
+    '',
+    29,
+    {
+      blocks: lateLineBlocks,
+      layout: {
+        lineSpacing: 1.2,
+        paragraphRatio: 1.5,
+        indentChars: 2,
+        alignMode: 'left',
+      },
+    },
+  );
+  assert.equal(safeProfile.summary.croppedInkPixels, 0);
+  assert.equal(safeProfile.summary.fontSize, lateProfile.summary.fontSize);
+  assert.equal(safeProfile.summary.layoutFullWidth, lateProfile.summary.layoutFullWidth);
+  assert.equal(safeProfile.summary.advanceY, lateProfile.summary.advanceY);
+  assert.equal(
+    safePreview.device.glyphs.filter((glyph) => glyph.frameClipped).length,
+    0,
+  );
+  assert.equal(safePreview.device.glyphs.at(-1).inkBounds.y, 775);
+  assert.equal(safePreview.device.glyphs.at(-1).inkBounds.height, 24);
+
   const narrowHangul = await renderXtfDevicePreview(xtf, '가'.repeat(30), 29, {
     layout: {
       lineSpacing: 1.2,
@@ -365,7 +462,7 @@ function makeFixtureXtg() {
   return bytes;
 }
 
-function makeFixtureXtf() {
+function makeFixtureXtf({ cellH = 1, fillEveryRow = false } = {}) {
   const headerSize = 64;
   const rangeTableOffset = headerSize;
   const rangeCount = 2;
@@ -373,7 +470,7 @@ function makeFixtureXtf() {
   const asciiWidthOffset = rangeTableOffset + rangeCount * 16;
   const glyphDataOffset = asciiWidthOffset + asciiCount;
   const glyphCount = asciiCount + 1;
-  const bytesPerGlyph = 3;
+  const bytesPerGlyph = 2 + cellH;
   const glyphDataSize = glyphCount * bytesPerGlyph;
   const bytes = new Uint8Array(glyphDataOffset + glyphDataSize);
   const view = new DataView(bytes.buffer);
@@ -382,7 +479,7 @@ function makeFixtureXtf() {
   bytes[0x07] = 1;
   bytes[0x08] = 0x02;
   bytes[0x0a] = 1;
-  bytes[0x0b] = 1;
+  bytes[0x0b] = cellH;
   bytes[0x0c] = 38;
   bytes[0x0d] = 28;
   bytes[0x0e] = 10;
@@ -403,7 +500,12 @@ function makeFixtureXtf() {
     const record = glyphDataOffset + glyphId * bytesPerGlyph;
     bytes[record] = glyphId === asciiCount ? 28 : 10;
     bytes[record + 1] = 0;
-    bytes[record + 2] = glyphId === 0 ? 0 : 0x80;
+    if (glyphId !== 0) {
+      bytes[record + 2] = 0x80;
+      if (fillEveryRow) {
+        bytes.fill(0x80, record + 2, record + 2 + cellH);
+      }
+    }
   }
   bytes.fill(10, asciiWidthOffset, asciiWidthOffset + asciiCount);
   bytes[asciiWidthOffset] = 9;

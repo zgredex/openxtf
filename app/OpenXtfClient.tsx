@@ -2997,6 +2997,15 @@ export default function OpenXtfClient() {
 
       <footer>
         <p>© 2026 OpenXTF</p>
+        <p>
+          <a
+            href="https://github.com/zgredex/openxtf"
+            target="_blank"
+            rel="noreferrer"
+          >
+            {copy.githubLink}
+          </a>
+        </p>
         <p>{copy.fontAttribution}</p>
       </footer>
 

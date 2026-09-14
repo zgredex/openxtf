@@ -1930,16 +1930,63 @@ function paintFirmwareImage(
     return;
   }
 
-  // FUN_4204d5dc clips to the framebuffer and draws a rectangular fallback
-  // when the decoded cache cannot be used. Pixel-exact driver colour handling
-  // for this rare branch remains in the decoder closure audit.
-  for (let x = 0; x < image.width; x += 1) {
-    paint(x, 0, 3);
-    paint(x, image.height - 1, 3);
+  // FUN_4204d5dc first clips the requested region, then draws the outline and
+  // both diagonals with the normal reader ink colour. Its +0x54 vtable call is
+  // the outline primitive; the two +0x50 calls are corner-to-corner lines.
+  const clippedLeft = Math.max(0, -originX);
+  const clippedTop = Math.max(0, -originY);
+  const clippedRight = Math.min(image.width, frameW - originX);
+  const clippedBottom = Math.min(image.height, frameH - originY);
+  const clippedWidth = clippedRight - clippedLeft;
+  const clippedHeight = clippedBottom - clippedTop;
+  if (clippedWidth < 1 || clippedHeight < 1) return;
+  const right = clippedRight - 1;
+  const bottom = clippedBottom - 1;
+  if (clippedWidth >= 2 && clippedHeight >= 2) {
+    for (let x = clippedLeft; x <= right; x += 1) {
+      paint(x, clippedTop, 3);
+      paint(x, bottom, 3);
+    }
+    for (let y = clippedTop + 1; y < bottom; y += 1) {
+      paint(clippedLeft, y, 3);
+      paint(right, y, 3);
+    }
   }
-  for (let y = 1; y + 1 < image.height; y += 1) {
-    paint(0, y, 3);
-    paint(image.width - 1, y, 3);
+  paintFirmwareLine(clippedLeft, clippedTop, right, bottom, paint);
+  if (clippedWidth >= 2 && clippedHeight >= 2) {
+    paintFirmwareLine(right, clippedTop, clippedLeft, bottom, paint);
+  }
+}
+
+function paintFirmwareLine(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  paint: (x: number, y: number, level: number) => void,
+) {
+  // Keep this integer and endpoint-inclusive. FUN_4204d5dc proves the two
+  // line calls and their clipped endpoints; resolving the concrete display
+  // object's tie-breaking pixel walk remains a separate driver-level audit.
+  let x = startX;
+  let y = startY;
+  const deltaX = Math.abs(endX - startX);
+  const stepX = startX < endX ? 1 : -1;
+  const deltaY = -Math.abs(endY - startY);
+  const stepY = startY < endY ? 1 : -1;
+  let error = deltaX + deltaY;
+  while (true) {
+    paint(x, y, 3);
+    if (x === endX && y === endY) break;
+    const doubledError = error * 2;
+    if (doubledError >= deltaY) {
+      error += deltaY;
+      x += stepX;
+    }
+    if (doubledError <= deltaX) {
+      error += deltaX;
+      y += stepY;
+    }
   }
 }
 

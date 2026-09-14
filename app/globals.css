@@ -1421,6 +1421,17 @@ footer p + p {
   margin-top: 5px;
 }
 
+footer a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 3px;
+}
+
+footer a:hover {
+  color: var(--foreground);
+}
+
 @media (max-width: 640px) {
   .top-nav a {
     display: none;

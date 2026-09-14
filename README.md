@@ -12,13 +12,11 @@ Live application: <https://openxtf.pages.dev/>
 
 ## Compatibility sources
 
-The byte-level format and behavior specifications live in
-[`../xtfont-research/`](../xtfont-research/). The browser worker, FreeType WASM
-runtime, default device repertoire, and controlled reference fixtures are pinned
-to hashes recorded there.
-
-The firmware-backed V6.3.15 glyph and spacing mapping used by the Korean
-preview is documented in [`docs/V6315-XTF-RENDERER.md`](docs/V6315-XTF-RENDERER.md).
+The firmware-backed V6.3.15 glyph, spacing, EPUB, image, and framebuffer
+mapping used by the Korean preview is documented in
+[`docs/V6315-XTF-RENDERER.md`](docs/V6315-XTF-RENDERER.md). The browser worker,
+FreeType WASM runtime, default device repertoire, and controlled fixtures are
+kept in this repository with the implementation they verify.
 
 ## Privacy boundary
 
