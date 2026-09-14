@@ -10,7 +10,10 @@ const research = path.resolve(project, '..', 'xtfont-research');
 const origin = process.env.OPENXTF_URL || 'http://127.0.0.1:3000';
 const port = Number(process.env.GECKODRIVER_PORT || 4445);
 const driverOrigin = `http://127.0.0.1:${port}`;
-const workerPath = '/assets/xtfont.worker-Ju52l4K3.js';
+const workerPath =
+  process.env.OPENXTF_WORKER_PATH || '/assets/xtfont.worker-DNIsIZBe.js';
+const currentOfficialWorkerSha256 =
+  '8a7d2251e9ec6d3e722be5a48528e936771ff49e5a35b226400e7c8503e3f38d';
 const font = fs.readFileSync(
   path.join(research, 'samples', 'input', 'ABeeZee-Regular.ttf'),
 ).toString('base64');
@@ -163,7 +166,11 @@ try {
         .join('');
     })();
   `);
-  const expectedWorkerSha = fixtures[0].workerSha256;
+  const expectedWorkerSha =
+    process.env.OPENXTF_WORKER_SHA256 ||
+    (workerPath.endsWith('/xtfont.worker-DNIsIZBe.js')
+      ? currentOfficialWorkerSha256
+      : fixtures[0].workerSha256);
   if (workerSha !== expectedWorkerSha) {
     throw new Error(`worker SHA mismatch: ${workerSha} != ${expectedWorkerSha}`);
   }

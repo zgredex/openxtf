@@ -709,6 +709,18 @@ a {
   gap: 8px;
 }
 
+.preview-device-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, auto));
+  gap: 4px;
+}
+
+.preview-device-switch .segment-button {
+  padding: 7px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
 .secondary-btn.compact-action {
   padding: 7px 12px;
   font-size: 12px;

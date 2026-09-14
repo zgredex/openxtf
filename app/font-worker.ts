@@ -3,6 +3,9 @@ export type FontWorkerError = Error & {
   fatal?: boolean;
 };
 
+export const OFFICIAL_XTFONT_WORKER_PATH =
+  '/assets/xtfont.worker-DNIsIZBe.js';
+
 export type FontBuildSummary = {
   format?: string;
   version: string;
@@ -311,28 +314,46 @@ function normalizeWorkerErrorCode(
   if (code && code !== 'XTFONT_WORKER_ERROR') return code;
 
   const detail = (message || '').toLowerCase();
-  if (detail.includes('choose a font file')) return 'XTFONT_FONT_REQUIRED';
+  if (
+    detail.includes('choose a font file') ||
+    detail.includes('请选择字体文件')
+  ) {
+    return 'XTFONT_FONT_REQUIRED';
+  }
   if (
     detail.includes('no convertible') ||
     detail.includes('none of the requested glyphs') ||
-    detail.includes('does not provide any convertible characters')
+    detail.includes('does not provide any convertible characters') ||
+    detail.includes('未提供可转换') ||
+    detail.includes('不包含字符集中的任何字形') ||
+    detail.includes('不包含可转换的 bmp 字形')
   ) {
     return 'XTFONT_NO_GLYPHS';
   }
-  if (detail.includes('thresholds must')) return 'XTFONT_INVALID_THRESHOLDS';
-  if (detail.includes('font loading timed out')) return 'XTFONT_FONT_LOAD_TIMEOUT';
+  if (detail.includes('thresholds must') || detail.includes('阈值必须')) {
+    return 'XTFONT_INVALID_THRESHOLDS';
+  }
+  if (detail.includes('font loading timed out') || detail.includes('字体加载超时')) {
+    return 'XTFONT_FONT_LOAD_TIMEOUT';
+  }
   if (
     detail.includes('legacy bin') ||
     detail.includes('cell width') ||
     detail.includes('cell height') ||
-    detail.includes('glyph data must be')
+    detail.includes('glyph data must be') ||
+    detail.includes('字格宽度') ||
+    detail.includes('字格高度') ||
+    detail.includes('字形数据长度')
   ) {
     return 'XTFONT_LEGACY_BIN_ERROR';
   }
   if (
     detail.includes('font file could not be parsed') ||
     detail.includes('cmap table') ||
-    detail.includes('cmap format')
+    detail.includes('cmap format') ||
+    detail.includes('字体文件无法解析') ||
+    detail.includes('字体缺少 cmap 表') ||
+    detail.includes('字体 cmap 格式暂不支持')
   ) {
     return 'XTFONT_INVALID_FONT_FILE';
   }
@@ -347,7 +368,12 @@ function normalizeWorkerErrorCode(
     detail.includes('canvas') ||
     detail.includes('fontface api') ||
     detail.includes('font rendering in a worker') ||
-    detail.includes('registering fonts in a worker')
+    detail.includes('registering fonts in a worker') ||
+    detail.includes('不支持 canvas') ||
+    detail.includes('无法创建 canvas') ||
+    detail.includes('不支持 fontface') ||
+    detail.includes('不支持字体 worker') ||
+    detail.includes('不支持在 worker 中注册字体')
   ) {
     return 'XTFONT_WORKER_UNSUPPORTED';
   }
@@ -362,7 +388,7 @@ export class FontWorkerClient {
   private disposed = false;
 
   constructor() {
-    this.worker = new Worker('/assets/xtfont.worker-Ju52l4K3.js', {
+    this.worker = new Worker(OFFICIAL_XTFONT_WORKER_PATH, {
       type: 'module',
     });
     this.worker.addEventListener('message', this.handleMessage);

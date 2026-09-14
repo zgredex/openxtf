@@ -42,7 +42,7 @@ export const TRANSLATIONS = {
     koreanProfileHint:
       'RIDI바탕 29px 래스터, 39×38 저장 셀과 2bpp를 기본값으로 사용합니다. 29px는 변환 입력값이지 화면 PPI나 기기 글꼴 크기가 아닙니다. 기기 레이아웃 기본값은 V6.3.15의 1.2× 줄 간격과 1.5× 문단 간격입니다.',
     standardProfileHint:
-      '공식 XTFont Maker와 동일한 자동 측정 및 직렬화 동작을 사용합니다.',
+      '현재 공식 XTFont Maker와 같은 기본값, 글꼴별 자동 보정, 셀 자동 측정 및 XTF 직렬화를 사용합니다. 미리보기는 완성된 XTF를 V6.3.15 렌더러로 다시 읽습니다.',
     outputFormat: '출력 형식',
     fontSize: '글꼴 크기',
     rasterSize: '래스터 크기',
@@ -157,6 +157,8 @@ export const TRANSLATIONS = {
       'BIN 파일에 저장되는 셀 너비를 조정합니다. 양수는 자간을 넓히고 음수는 좁히며, 너무 많이 줄이면 획이 잘릴 수 있습니다.',
     xtfSpacingHint:
       '글리프별 저장 너비를 픽셀 단위로 조정합니다. V6.3.15의 일반 한글 자간에는 적용되지 않으며, 한글은 위의 한글·CJK 전각 너비로 조정합니다. ASCII와 일부 비 CJK 유니코드 범위에는 영향을 줍니다.',
+    standardLetterSpacingHint:
+      '글리프별 가로 간격을 픽셀 단위로 조정합니다. 양수는 넓히고 음수는 서로 겹치지 않는 범위에서 좁힙니다.',
     systemFontFallback: '브라우저 대체 글리프를 XTF에 저장',
     systemFontFallbackHint:
       '기본 글꼴과 업로드한 대체 글꼴에 없는 문자를 브라우저 기본 serif로 래스터화해 XTF에 넣습니다. 이는 기기에서 자동으로 일어나는 대체가 아니며, 생성 환경에 따라 모양이 달라질 수 있습니다.',
@@ -166,6 +168,8 @@ export const TRANSLATIONS = {
       '다운로드 파일 이름만 바꿉니다. XTF 바이트와 기기 표시에는 영향을 주지 않습니다.',
     placeholders:
       '자리표시자: [fontname], [rastersize], [cellsize], [bppname], [spacing], [gamma], [thresholds], [embolden], [date], [time] 등',
+    standardPlaceholders:
+      '자리표시자: [fontname], [fontsize], [bpp], [date], [time] 등',
     advanced: '고급 설정',
     advancedHint:
       '출력 파일 이름과 표준 프로필의 추가 생성 방식을 설정합니다.',
@@ -237,6 +241,12 @@ export const TRANSLATIONS = {
     epubEmptyError: 'EPUB의 읽기 순서에서 표시할 본문을 찾지 못했습니다.',
     updatingPreview: '미리보기 업데이트 중',
     deviceLayout: '기기 레이아웃',
+    x4Series: 'X4 시리즈 · 480×800',
+    x3Series: 'X3 시리즈 · 528×792',
+    x3PreviewModelHint:
+      'X3는 현재 공식 XTFont Maker의 레이아웃 미리보기를 사용합니다. 펌웨어 디컴파일 기반 진단은 X4 V6.3.15에서만 제공됩니다.',
+    x3DiagnosticsUnavailable:
+      'X3 펌웨어 렌더러가 아직 검증되지 않아 상세 진단은 X4에서만 사용할 수 있습니다.',
     enlarge: '크게 보기',
     fontPreview: '글꼴 미리보기',
     previewNoFont: '글꼴을 불러오면 실시간 미리보기가 여기에 표시됩니다.',
@@ -557,7 +567,7 @@ export const TRANSLATIONS = {
     koreanProfileHint:
       'Defaults to a 29 px RIDI Batang raster, a 39×38 storage cell and 2bpp. The 29 px value is conversion input—not display PPI or a device font-size label. Device-layout defaults are V6.3.15’s 1.2× line spacing and 1.5× paragraph spacing.',
     standardProfileHint:
-      'Uses the official XTFont Maker automatic measurement and serialization behavior.',
+      'Uses the current official XTFont Maker defaults, per-font auto-tuning, automatic cell measurement and XTF serialization. The preview then reads the finished XTF through the V6.3.15 renderer.',
     outputFormat: 'Output format',
     fontSize: 'Font size',
     rasterSize: 'Raster size',
@@ -672,6 +682,8 @@ export const TRANSLATIONS = {
       'Changes the cell width stored in the BIN file. Positive values loosen spacing; negative values tighten it and may crop strokes if too large.',
     xtfSpacingHint:
       'Adjusts stored per-glyph widths. V6.3.15 does not use this for ordinary Hangul; tune Hangul with the Hangul/CJK full width above. It affects ASCII and selected non-CJK Unicode ranges.',
+    standardLetterSpacingHint:
+      'Adjust horizontal spacing per glyph in pixels. Positive values loosen it; negative values tighten it without overlapping glyphs.',
     systemFontFallback: 'Bake browser fallback glyphs into XTF',
     systemFontFallbackHint:
       "Rasterize characters missing from the main and uploaded fallback fonts with the browser's default serif and store them in the XTF. This is not an automatic device fallback, and its appearance can vary by build environment.",
@@ -681,6 +693,8 @@ export const TRANSLATIONS = {
       'Changes only the downloaded filename. It does not alter XTF bytes or device rendering.',
     placeholders:
       'Placeholders: [fontname], [rastersize], [cellsize], [bppname], [spacing], [gamma], [thresholds], [embolden], [date], [time], etc.',
+    standardPlaceholders:
+      'Placeholders: [fontname], [fontsize], [bpp], [date], [time], etc.',
     advanced: 'Advanced',
     advancedHint:
       'Choose the output filename and additional standard-profile generation behavior.',
@@ -751,6 +765,12 @@ export const TRANSLATIONS = {
     epubEmptyError: 'No readable content was found in the EPUB spine.',
     updatingPreview: 'Updating preview',
     deviceLayout: 'Device layout',
+    x4Series: 'X4 Series · 480×800',
+    x3Series: 'X3 Series · 528×792',
+    x3PreviewModelHint:
+      'X3 currently uses the official XTFont Maker layout preview. Firmware-decompilation diagnostics are available only for X4 V6.3.15.',
+    x3DiagnosticsUnavailable:
+      'Detailed diagnostics are available only for X4 because the X3 firmware renderer has not yet been verified.',
     enlarge: 'Enlarge',
     fontPreview: 'Font preview',
     previewNoFont: 'Live preview will appear here once a font is loaded',

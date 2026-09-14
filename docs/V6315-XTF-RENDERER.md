@@ -73,6 +73,24 @@ paragraph ratio, first-line indent, and alignment mode must all be recorded.
 Without those inputs, a capture must not be used to tune glyph scale, advance,
 line height, paragraph spacing, or page capacity.
 
+### Standard XTFont conversion versus preview
+
+Standard XTFont mode has two deliberately separate stages. Stage one uses the
+current official XTFont Maker defaults, per-font hidden bias, automatic
+measurement and serializer to produce the XTF bytes. Stage two parses those
+finished bytes and executes this V6.3.15 model. The official website's own X4
+and X3 previews are simple converter canvases: they iterate preview code points,
+wrap by generated advance and use the generated `advanceY`, but do not execute
+the firmware EPUB record splitter, paragraph modes, CJK indent insertion or
+alignment/justification branches.
+
+OpenXTF previously sent Standard mode directly to that generic worker preview.
+That reproduced the official website's preview, not stock-firmware behavior.
+X4 Standard preview now uses the same finished-XTF firmware path as the Korean
+profile, without applying the Korean profile's 39×38 metadata patch. X3 remains
+explicitly labeled as the official generic 528×792 model until an X3 firmware
+program has been independently decompiled and verified.
+
 ## Selecting the XTF renderer
 
 `FUN_4205ba98` recognizes `.xtf` and `.XTF`. `FUN_420d191e` combines that
@@ -468,6 +486,18 @@ sample that lands on the same output pixel before thresholding. These names
 were added to the selected Ghidra program only after the callback entry points,
 boundaries, and scale-flag direction were recovered.
 
+The native PNG byte path is now closed as well. `FUN_420cd5c2` allocates the
+pngle-compatible context through `FUN_42040d56` and streams chunks through
+`FUN_42040df0`. The active build accepts grayscale, truecolor, indexed,
+grayscale+alpha and RGBA forms at their PNG-legal 1/2/4/8/16-bit depths,
+validates chunk CRCs, reconstructs filters 0...4, and uses the exact eight-entry
+non-interlaced/Adam7 tables at `0x3c27b5d0...0x3c27b64f`. Dimensions are
+restricted to 1...1024 by `FUN_42060592`. The context is zero-initialized and
+the wrapper never sets display gamma, so a `gAMA` chunk does not transform the
+samples in this call path. Native alpha in color types 4/6 reaches the
+alpha-aware callbacks; `tRNS` alpha attached to color types 0/2/3 is decoded
+but is not consumed by the active opaque callbacks.
+
 The three decoders do not hand a four-level image to the EPUB painter. Their
 current-build callbacks reduce source pixels to a one-bit drawing surface.
 RGB is converted with the fixed-point BT.601 expression
@@ -526,9 +556,10 @@ XTG exactly and decodes the V6.3.15 BMP input bytes without browser image or
 color-management behavior. The native BMP path pins 1/4/8-bit indexed,
 16-bit BI_RGB/BI_BITFIELDS, 24/32-bit, bottom-up/top-down, palette, row-stride,
 crop, centering, luminance, and rejection behavior. OpenXTF applies the current
-PNG fixed-point downscale/averaging, white alpha composition, custom error
-propagation, and ordered threshold after the browser returns source RGBA
-pixels. Native PNG byte decoding remains the image-raster gap. For JPEG it
+PNG source-byte decoder before the recovered fixed-point downscale/averaging,
+white alpha composition, custom error propagation, and ordered threshold.
+Browser PNG decoding and browser color management are no longer in this path.
+For JPEG it
 loads a 14 KB WebAssembly build from pinned TJpgDec v1.0.8/R0.03 source and
 applies the configuration, grayscale saturation modification, scale selection,
 and per-MCU resampler verified above. `JpegOutputCallbackV6315` uses an
@@ -1219,7 +1250,7 @@ plausible.
 | Heading/literal-center/class-center handling and ignored CSS | `0x4206ec7e`, `0x4206ef9e`, `0x4207153e`, `0x420d9e84`, `0x420dcddc` | Exact class set, record prefixes, centering and one-pixel heading pass implemented | Synthetic zipped EPUB in real Firefox covers class/literal center, headings, nested styles and ignored inline CSS | Closed for the verified Korean/Latin tag-state path |
 | Image record sizing, page fit, placement and placeholder | composer image branch, `0x420942d2`, `0x42073b4c`, `0x420943b4`, `0x42054d8a` | Separate image records and transitions modeled | Manual/Auto placeholder fixture | Closed for record/layout behavior |
 | Native XTG and JPEG cache raster | `0x4205e08c`, `0x42055f5c`, `0x42069688`, `0x403808a4` | XTG exact; pinned TJpgDec WASM plus V6.3.15 resample/dither path | XTG bit fixture, JPEG decoder fixture and stable hashes | Closed from a fresh JPEG-cache phase; existing-device phase history is explicitly reported |
-| PNG and BMP source decoding before verified firmware scaling/dither/crop | PNG row callbacks, `0x42053846`, `FUN_420a8d52`, `0x420cdf7e` | BMP is decoded natively; PNG still uses browser RGBA before verified firmware scaling/dither | BMP bit-depth/orientation/compression fixtures and core dither thresholds | BMP closed for accepted V6.3.15 inputs; native PNG byte decoding remains open |
+| PNG and BMP source decoding before verified firmware scaling/dither/crop | `FUN_420cd5c2`, `FUN_42040d56`, `FUN_42040df0`, PNG row callbacks, `0x42053846`, `FUN_420a8d52`, `0x420cdf7e` | Both formats decode source bytes natively before the recovered scaler/dither/crop | PNG color/depth/filter/CRC/Adam7/alpha fixtures; BMP bit-depth/orientation/compression fixtures | Closed for accepted V6.3.15 PNG and BMP inputs |
 | Display line/rectangle raster before panel refresh | vtables `0x3c269114`/`0x3c29f2a0`, `0x4200a67c`, `0x4200a5f0`, `0x4200a3ce` | Strict-tie Adafruit-style line walk implemented | Forward/reverse steep tie fixture | Closed for logical framebuffer primitives |
 | Physical e-ink waveform, ghosting and photographed contrast | Outside the logical framebuffer contract | Intentionally not simulated | Not applicable | Out of scope; never used to tune typography |
 | Tibetan and Thai shaping/cluster branches | Present in firmware | Partially traced | Not complete | Deliberately deferred at the user's direction |

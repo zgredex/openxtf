@@ -27,6 +27,12 @@ import type {
 } from './xtf-device';
 import { readEpub } from './epub';
 import type { EpubBook } from './epub';
+import {
+  effectiveStandardEmbolden,
+  officialStandardEmboldenBias,
+  STANDARD_XTF_DEFAULTS,
+} from './standard-xtfont';
+import type { StandardFontFeatures } from './standard-xtfont';
 
 const PREVIEW_TEXT =
   '가시는 걸음걸음 놓인 그 꽃을 사뿐히 즈려밟고 가시옵소서.';
@@ -75,6 +81,7 @@ const KOREAN_NORMAL_WEIGHT = {
 type WeightName = keyof typeof WEIGHT_PRESETS | 'custom';
 type OutputFormat = 'xtf' | 'legacy-bin';
 type GlyphScope = 'device' | 'full';
+type PreviewDevice = 'x4' | 'x3';
 type TranslationCopy = (typeof TRANSLATIONS)[Language];
 
 const DIAGNOSTIC_ADVANCE_SOURCES = [
@@ -109,7 +116,13 @@ export default function OpenXtfClient() {
   const previewPrepareCacheRef = useRef<{
     key: string;
     missingCps: number[];
+    features: StandardFontFeatures | null;
   } | null>(null);
+  const standardEditSourceRef = useRef<'default' | 'auto' | 'manual'>(
+    'default',
+  );
+  const standardManualKeysRef = useRef(new Set<string>());
+  const standardAutoTuneKeyRef = useRef('');
 
   const [font, setFont] = useState<File | null>(null);
   const [fallbacks, setFallbacks] = useState<File[]>([]);
@@ -129,6 +142,9 @@ export default function OpenXtfClient() {
   );
   const [thresholdSpread, setThresholdSpread] = useState(64);
   const [embolden, setEmbolden] = useState(0);
+  const [standardEmboldenBias, setStandardEmboldenBias] = useState<number>(
+    STANDARD_XTF_DEFAULTS.emboldenBias,
+  );
   const [letterSpacing, setLetterSpacing] = useState(0);
   const [binThreshold, setBinThreshold] = useState(127);
   const [glyphScope, setGlyphScope] = useState<GlyphScope>('full');
@@ -143,6 +159,7 @@ export default function OpenXtfClient() {
   const [epubTextEdited, setEpubTextEdited] = useState(false);
   const [deviceLayoutSettings, setDeviceLayoutSettings] =
     useState<DeviceLayoutSettings>(DEFAULT_DEVICE_LAYOUT_SETTINGS);
+  const [previewDevice, setPreviewDevice] = useState<PreviewDevice>('x4');
   const [epubLoading, setEpubLoading] = useState(false);
   const [epubError, setEpubError] = useState('');
   const [preview, setPreview] = useState<FontPreviewResult | null>(null);
@@ -199,6 +216,9 @@ export default function OpenXtfClient() {
       : thresholds;
   const actualBpp = format === 'legacy-bin' ? 1 : bpp;
   const actualScope = format === 'legacy-bin' ? 'full' : glyphScope;
+  const effectiveEmbolden = koreanProfileActive
+    ? Number(embolden.toFixed(2))
+    : effectiveStandardEmbolden(embolden, standardEmboldenBias);
   const allCharacters = defaultCharacters + extraCharacters;
   const defaultCharacterCount = uniqueCodePointCount(defaultCharacters);
   const extraCharacterCount = uniqueCodePointCount(extraCharacters);
@@ -207,8 +227,11 @@ export default function OpenXtfClient() {
     deviceLayoutSettings.lineSpacing === 'auto'
       ? 1
       : deviceLayoutSettings.lineSpacing;
-  const deviceBaseAdvanceY =
-    koreanSettings.advanceY || koreanSettings.cellH;
+  const deviceBaseAdvanceY = koreanProfileActive
+    ? koreanSettings.advanceY || koreanSettings.cellH
+    : preview?.device?.xtfHeader?.effectiveAdvanceY ??
+      preview?.metrics?.advanceY ??
+      fontSize;
   const deviceLineAdvance = deviceBaseAdvanceY * deviceLineFactor;
   const missingSample = missingCps
     .slice(0, 40)
@@ -228,6 +251,7 @@ export default function OpenXtfClient() {
       })
       .join('|');
   }, [font, fallbacks]);
+  const standardConverterKey = `${format}|${fontKey}`;
 
   // Device-layout choices and preview content do not alter the XTF bytes.
   // Keep the exact profiled build so those changes can be rendered again
@@ -242,9 +266,7 @@ export default function OpenXtfClient() {
         actualBpp,
         gamma,
         actualThresholds,
-        koreanProfileActive
-          ? Number(embolden.toFixed(2))
-          : Number((embolden + 0.1).toFixed(2)),
+        effectiveEmbolden,
         letterSpacing,
         binThreshold,
         actualScope,
@@ -258,13 +280,12 @@ export default function OpenXtfClient() {
       actualBpp,
       gamma,
       actualThresholds,
-      embolden,
       letterSpacing,
       binThreshold,
       actualScope,
       systemFallback,
       allCharacters,
-      koreanProfileActive,
+      effectiveEmbolden,
     ],
   );
   const previewXtfBuildKey = useMemo(
@@ -368,59 +389,62 @@ export default function OpenXtfClient() {
           prepared = {
             key: previewPrepareKey,
             missingCps: result.missingCps || [],
+            features: result.features as StandardFontFeatures | null,
           };
           previewPrepareCacheRef.current = prepared;
         }
         if (sequence !== previewSequence.current) return;
         setMissingCps(prepared.missingCps);
+        if (
+          typographyProfile === 'standard' &&
+          format === 'xtf' &&
+          applyOfficialStandardAutoTune(prepared.features)
+        ) {
+          return;
+        }
         let rendered: FontPreviewResult;
-        if (koreanProfileActive) {
-          let profiledPreview =
-            previewXtfCacheRef.current?.key === previewXtfBuildKey
-              ? previewXtfCacheRef.current.result
+        if (format === 'xtf' && previewDevice === 'x4') {
+          let previewFont =
+            previewSourceXtfCacheRef.current?.key === previewSourceXtfBuildKey
+              ? previewSourceXtfCacheRef.current.result
               : null;
-          if (!profiledPreview) {
-            let previewFont =
-              previewSourceXtfCacheRef.current?.key === previewSourceXtfBuildKey
-                ? previewSourceXtfCacheRef.current.result
-                : null;
-            if (!previewFont) {
-              localPreviewWorker = new FontWorkerClient();
-              await localPreviewWorker.probe();
-              previewFont = await localPreviewWorker.build({
-                options: {
-                  ...makeOptions(),
-                  fontFile: font,
-                  fallbackFiles: [...fallbacks],
-                  // The worker derives its raster cell, baselines, and advances
-                  // from the complete selected glyph population. A page-only
-                  // subset can therefore produce different glyph records from
-                  // the exported XTF. Build the exact output scope here and feed
-                  // those finished bytes to the firmware preview.
-                  charsText: allCharacters,
-                  glyphScope: actualScope,
-                  systemFallback,
-                  fileNamePattern: 'preview.xtf',
-                  includePreview: false,
-                },
-              });
-              previewSourceXtfCacheRef.current = {
-                key: previewSourceXtfBuildKey,
-                result: previewFont,
-              };
-            }
-            if (sequence !== previewSequence.current) return;
-            profiledPreview = applyKoreanX4Profile(
-              previewFont,
-              koreanSettings,
-            );
+          if (!previewFont) {
+            localPreviewWorker = new FontWorkerClient();
+            await localPreviewWorker.probe();
+            previewFont = await localPreviewWorker.build({
+              options: {
+                ...makeOptions(),
+                fontFile: font,
+                fallbackFiles: [...fallbacks],
+                // The official converter derives its cell, baselines and
+                // advances from the complete selected glyph population. Build
+                // those exact output bytes before invoking the firmware model.
+                charsText: allCharacters,
+                glyphScope: actualScope,
+                systemFallback,
+                fileNamePattern: 'preview.xtf',
+                includePreview: false,
+              },
+            });
+            previewSourceXtfCacheRef.current = {
+              key: previewSourceXtfBuildKey,
+              result: previewFont,
+            };
+          }
+          if (sequence !== previewSequence.current) return;
+          let finishedPreview = previewFont;
+          if (koreanProfileActive) {
+            finishedPreview =
+              previewXtfCacheRef.current?.key === previewXtfBuildKey
+                ? previewXtfCacheRef.current.result
+                : applyKoreanX4Profile(previewFont, koreanSettings);
             previewXtfCacheRef.current = {
               key: previewXtfBuildKey,
-              result: profiledPreview,
+              result: finishedPreview,
             };
           }
           rendered = await renderXtfDevicePreview(
-            profiledPreview.bytes,
+            finishedPreview.bytes,
             previewText,
             fontSize,
             {
@@ -430,8 +454,8 @@ export default function OpenXtfClient() {
               documentLanguage: epubBook?.language,
             },
           );
-          if (rendered.device) {
-            rendered.device.profile = profileReport(profiledPreview);
+          if (rendered.device && koreanProfileActive) {
+            rendered.device.profile = profileReport(finishedPreview);
           }
         } else {
           rendered = await worker.preview({
@@ -492,6 +516,7 @@ export default function OpenXtfClient() {
     typographyProfile,
     koreanSettings,
     deviceLayoutSettings,
+    previewDevice,
     previewBlocks,
     selectedEpubSection,
     previewXtfBuildKey,
@@ -509,16 +534,14 @@ export default function OpenXtfClient() {
       renderMode: 'manual',
       gamma,
       thresholds: actualThresholds,
-      embolden: koreanProfileActive
-        ? Number(embolden.toFixed(2))
-        : Number((embolden + 0.1).toFixed(2)),
+      embolden: effectiveEmbolden,
       letterSpacing,
       previewText,
       charsText: allCharacters,
       glyphScope: actualScope,
       systemFallback,
       previewMode: 'device',
-      previewDevice: 'x4',
+      previewDevice,
       scale: 3,
     };
   }
@@ -607,6 +630,36 @@ export default function OpenXtfClient() {
     setPreviewText(PREVIEW_TEXT);
   }
 
+  function markStandardParametersManual() {
+    if (typographyProfile !== 'standard') return;
+    standardEditSourceRef.current = 'manual';
+    if (standardConverterKey) {
+      standardManualKeysRef.current.add(standardConverterKey);
+    }
+  }
+
+  function applyOfficialStandardAutoTune(
+    features: StandardFontFeatures | null,
+  ) {
+    if (!features || !standardConverterKey) return false;
+    if (standardAutoTuneKeyRef.current === standardConverterKey) return false;
+    standardAutoTuneKeyRef.current = standardConverterKey;
+
+    const source = standardEditSourceRef.current;
+    const mayAdjust =
+      source === 'default' ||
+      source === 'auto' ||
+      (source === 'manual' &&
+        !standardManualKeysRef.current.has(standardConverterKey));
+    if (!mayAdjust) return false;
+
+    const nextBias = officialStandardEmboldenBias(features);
+    if (nextBias === standardEmboldenBias) return false;
+    standardEditSourceRef.current = 'auto';
+    setStandardEmboldenBias(nextBias);
+    return true;
+  }
+
   function applyWeightPreset(name: keyof typeof WEIGHT_PRESETS) {
     const preset =
       koreanProfileActive && name === 'normal'
@@ -616,6 +669,7 @@ export default function OpenXtfClient() {
     setGamma(preset.gamma);
     setThresholdMode('custom');
     setThresholds(preset.thresholds);
+    markStandardParametersManual();
   }
 
   function activateKoreanProfile() {
@@ -634,23 +688,30 @@ export default function OpenXtfClient() {
     setFileNamePattern(DEFAULT_OUTPUT_PATTERN);
     setKoreanSettings(DEFAULT_KOREAN_X4_SETTINGS);
     setDeviceLayoutSettings(DEFAULT_DEVICE_LAYOUT_SETTINGS);
+    setPreviewDevice('x4');
     setResults([]);
     void chooseReadyFont(READY_FONTS[0]);
   }
 
   function activateStandardProfile() {
     setTypographyProfile('standard');
-    setFontSize(36);
-    setBpp(2);
-    setWeight('normal');
-    setGamma(1.8);
+    setFormat('xtf');
+    setFontSize(STANDARD_XTF_DEFAULTS.fontSize);
+    setBpp(STANDARD_XTF_DEFAULTS.bpp);
+    setWeight(STANDARD_XTF_DEFAULTS.weight);
+    setGamma(STANDARD_XTF_DEFAULTS.gamma);
     setThresholdMode('custom');
-    setThresholds('56,120,184');
-    setEmbolden(0);
-    setLetterSpacing(0);
-    setGlyphScope('full');
-    setSystemFallback(true);
-    setFileNamePattern(DEFAULT_OUTPUT_PATTERN);
+    setThresholds(STANDARD_XTF_DEFAULTS.thresholds);
+    setEmbolden(STANDARD_XTF_DEFAULTS.embolden);
+    setStandardEmboldenBias(STANDARD_XTF_DEFAULTS.emboldenBias);
+    setLetterSpacing(STANDARD_XTF_DEFAULTS.letterSpacing);
+    setGlyphScope(STANDARD_XTF_DEFAULTS.glyphScope);
+    setSystemFallback(STANDARD_XTF_DEFAULTS.systemFallback);
+    setFileNamePattern(STANDARD_XTF_DEFAULTS.fileNamePattern);
+    setPreviewDevice('x4');
+    standardEditSourceRef.current = 'default';
+    standardManualKeysRef.current.clear();
+    standardAutoTuneKeyRef.current = '';
     setResults([]);
   }
 
@@ -895,38 +956,44 @@ export default function OpenXtfClient() {
         },
         setBuildProgress,
       );
-      if (koreanProfileActive) {
+      if (format === 'xtf') {
         previewSourceXtfCacheRef.current = {
           key: previewSourceXtfBuildKey,
           result,
         };
-        result = applyKoreanX4Profile(result, koreanSettings);
-        previewXtfCacheRef.current = {
-          key: previewXtfBuildKey,
-          result,
-        };
-        const rendered = await renderXtfDevicePreview(
-          result.bytes,
-          previewText,
-          result.summary.fontSize,
-          {
-            layout: deviceLayoutSettings,
-            blocks: previewBlocks,
-            skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
-            documentLanguage: epubBook?.language,
-          },
-        );
-        if (rendered.device) rendered.device.profile = profileReport(result);
-        setPreview(rendered);
+        if (koreanProfileActive) {
+          result = applyKoreanX4Profile(result, koreanSettings);
+          previewXtfCacheRef.current = {
+            key: previewXtfBuildKey,
+            result,
+          };
+        }
+        if (previewDevice === 'x4') {
+          const rendered = await renderXtfDevicePreview(
+            result.bytes,
+            previewText,
+            result.summary.fontSize,
+            {
+              layout: deviceLayoutSettings,
+              blocks: previewBlocks,
+              skippedEmptyBlocks: selectedEpubSection?.skippedEmptyBlocks,
+              documentLanguage: epubBook?.language,
+            },
+          );
+          if (rendered.device && koreanProfileActive) {
+            rendered.device.profile = profileReport(result);
+          }
+          setPreview(rendered);
+        }
       }
-      result = applyOutputFileName(result, font.name, fileNamePattern, {
-        gamma,
-        thresholds: actualThresholds,
-        embolden: koreanProfileActive
-          ? Number(embolden.toFixed(2))
-          : Number((embolden + 0.1).toFixed(2)),
-        letterSpacing,
-      });
+      if (koreanProfileActive) {
+        result = applyOutputFileName(result, font.name, fileNamePattern, {
+          gamma,
+          thresholds: actualThresholds,
+          embolden: effectiveEmbolden,
+          letterSpacing,
+        });
+      }
       setResults((current) => [result, ...current]);
       setBuildProgress(1);
       setSuccess(copy.generatedSuccess);
@@ -1067,6 +1134,7 @@ export default function OpenXtfClient() {
           onChange={(value) => {
             setEmbolden(value);
             setWeight('custom');
+            markStandardParametersManual();
           }}
           hint={copy.strokeWeightHint}
           tooltip={copy.strokeWeightHelp}
@@ -1114,6 +1182,7 @@ export default function OpenXtfClient() {
         onChange={(value) => {
           setGamma(value);
           setWeight('custom');
+          markStandardParametersManual();
         }}
         hint=""
         tooltip={copy.gammaHelp}
@@ -1131,6 +1200,7 @@ export default function OpenXtfClient() {
         onChange={(event) => {
           setThresholdMode(event.target.value as 'symmetric' | 'custom');
           setWeight('custom');
+          markStandardParametersManual();
         }}
       >
         <option value="symmetric">{copy.symmetric}</option>
@@ -1147,6 +1217,7 @@ export default function OpenXtfClient() {
           onChange={(value) => {
             setThresholdSpread(value);
             setWeight('custom');
+            markStandardParametersManual();
           }}
           hint={copy.spreadHint(thresholdSpread)}
           tooltip={copy.thresholdsHelp}
@@ -1161,6 +1232,7 @@ export default function OpenXtfClient() {
           onChange={(event) => {
             setThresholds(event.target.value);
             setWeight('custom');
+            markStandardParametersManual();
           }}
         />
       )}
@@ -1388,7 +1460,9 @@ export default function OpenXtfClient() {
                   <SegmentButton
                     active={format === 'legacy-bin'}
                     onClick={() => {
-                      activateStandardProfile();
+                      if (typographyProfile !== 'standard') {
+                        activateStandardProfile();
+                      }
                       setFormat('legacy-bin');
                     }}
                   >
@@ -1634,7 +1708,7 @@ export default function OpenXtfClient() {
               ) : (
                 <>
                   <NumberField
-                    label={copy.rasterSize}
+                    label={copy.fontSize}
                     value={fontSize}
                     min={1}
                     max={255}
@@ -1659,12 +1733,12 @@ export default function OpenXtfClient() {
                   hint={
                     format === 'legacy-bin'
                       ? copy.binSpacingHint
-                      : copy.xtfSpacingHint
+                      : copy.standardLetterSpacingHint
                   }
                   tooltip={
                     format === 'legacy-bin'
                       ? copy.binSpacingHint
-                      : copy.xtfSpacingHint
+                      : copy.standardLetterSpacingHint
                   }
                 />
               ) : null}
@@ -1694,6 +1768,27 @@ export default function OpenXtfClient() {
                 </label>
               ) : null}
 
+              {!koreanProfileActive ? (
+                <label
+                  className="block space-y-1.5 setting-help-host"
+                  title={copy.outputFilenameHelp}
+                >
+                  <span className="field-label">
+                    <SettingLabel
+                      label={copy.outputFilenamePattern}
+                      help={copy.outputFilenameHelp}
+                    />
+                  </span>
+                  <input
+                    className="input"
+                    type="text"
+                    value={fileNamePattern}
+                    onChange={(event) => setFileNamePattern(event.target.value)}
+                  />
+                  <span className="hint">{copy.standardPlaceholders}</span>
+                </label>
+              ) : null}
+
               <div className="advanced-shell">
                 <button
                   type="button"
@@ -1710,24 +1805,28 @@ export default function OpenXtfClient() {
                         ? copy.advancedKoreanHint
                         : copy.advancedHint}
                     </p>
-                    <label
-                      className="block space-y-1.5 setting-help-host"
-                      title={copy.outputFilenameHelp}
-                    >
-                      <span className="field-label">
-                        <SettingLabel
-                          label={copy.outputFilenamePattern}
-                          help={copy.outputFilenameHelp}
+                    {koreanProfileActive ? (
+                      <label
+                        className="block space-y-1.5 setting-help-host"
+                        title={copy.outputFilenameHelp}
+                      >
+                        <span className="field-label">
+                          <SettingLabel
+                            label={copy.outputFilenamePattern}
+                            help={copy.outputFilenameHelp}
+                          />
+                        </span>
+                        <input
+                          className="input"
+                          type="text"
+                          value={fileNamePattern}
+                          onChange={(event) =>
+                            setFileNamePattern(event.target.value)
+                          }
                         />
-                      </span>
-                      <input
-                        className="input"
-                        type="text"
-                        value={fileNamePattern}
-                        onChange={(event) => setFileNamePattern(event.target.value)}
-                      />
-                      <span className="hint">{copy.placeholders}</span>
-                    </label>
+                        <span className="hint">{copy.placeholders}</span>
+                      </label>
+                    ) : null}
                     {format === 'xtf' ? (
                       <>
                         {!koreanProfileActive ? bitDepthControls : null}
@@ -1875,6 +1974,29 @@ export default function OpenXtfClient() {
                       {copy.clearEpub}
                     </button>
                   ) : null}
+                  {typographyProfile === 'standard' && format === 'xtf' ? (
+                    <div
+                      className="preview-device-switch"
+                      role="group"
+                      aria-label={copy.deviceLayout}
+                    >
+                      <SegmentButton
+                        active={previewDevice === 'x4'}
+                        onClick={() => setPreviewDevice('x4')}
+                      >
+                        {copy.x4Series}
+                      </SegmentButton>
+                      <SegmentButton
+                        active={previewDevice === 'x3'}
+                        onClick={() => {
+                          setPreviewDevice('x3');
+                          setShowDiagnostics(false);
+                        }}
+                      >
+                        {copy.x3Series}
+                      </SegmentButton>
+                    </div>
+                  ) : null}
                   {koreanProfileActive ? (
                     <button
                       type="button"
@@ -1895,7 +2017,16 @@ export default function OpenXtfClient() {
                   <button
                     type="button"
                     className="secondary-btn compact-action"
-                    disabled={!preview?.device || !preview?.metrics}
+                    title={
+                      previewDevice === 'x3'
+                        ? copy.x3DiagnosticsUnavailable
+                        : undefined
+                    }
+                    disabled={
+                      !preview?.device ||
+                      !preview?.metrics ||
+                      previewDevice === 'x3'
+                    }
                     onClick={() => setShowDiagnostics((value) => !value)}
                   >
                     {showDiagnostics
@@ -1930,7 +2061,7 @@ export default function OpenXtfClient() {
                   <p className="hint">{copy.epubPrivacyHint}</p>
                 </div>
               ) : null}
-              {koreanProfileActive ? (
+              {format === 'xtf' && previewDevice === 'x4' ? (
                 <section className="device-reader-layout">
                   <div className="device-reader-layout-heading">
                     <div>
@@ -2036,6 +2167,8 @@ export default function OpenXtfClient() {
                     </label>
                   </div>
                 </section>
+              ) : format === 'xtf' ? (
+                <p className="hint">{copy.x3PreviewModelHint}</p>
               ) : null}
               <textarea
                 className="input preview-text-input"
@@ -2814,7 +2947,7 @@ export default function OpenXtfClient() {
               ) : null}
               {preview?.device && preview?.metrics ? (
                 <p className="hint">
-                  {koreanProfileActive
+                  {format === 'xtf' && previewDevice === 'x4'
                     ? copy.koreanPreviewDetails(
                         preview.device.lineCount,
                         preview.metrics.advanceY,

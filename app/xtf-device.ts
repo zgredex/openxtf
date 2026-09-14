@@ -3,6 +3,7 @@ import type {
   FontPreviewResult,
   FontWorkerError,
 } from './font-worker';
+import { unzlibSync } from 'fflate';
 import { firmwareHyphenationPoints } from './v6315-hyphenation';
 import { decodeV6315JpegGrayscale } from './v6315-jpeg';
 
@@ -1194,7 +1195,7 @@ async function prepareFirmwareImageRecord(
   jpegDitherState: { phase: number },
 ): Promise<PlannedImage> {
   const defaultHeight = firmwareDefaultImageHeight(lineStep);
-  const imageType = firmwareRasterImageType(image.bytes, image.mediaType);
+  const imageType = firmwareRasterImageType(image.archivePath);
   const scaled = imageType === 'bmp'
     ? firmwareBmpCacheDimensions(
         image.width,
@@ -1217,6 +1218,7 @@ async function prepareFirmwareImageRecord(
   if (scaled && image.bytes.length) {
     const decoded = await decodeBrowserImageLevels(
       image.bytes,
+      image.archivePath,
       image.mediaType,
       image.width,
       image.height,
@@ -1364,6 +1366,7 @@ type DecodedFirmwareImage = {
 
 async function decodeBrowserImageLevels(
   bytes: Uint8Array,
+  archivePath: string,
   mediaType: string,
   sourceWidth: number,
   sourceHeight: number,
@@ -1382,7 +1385,7 @@ async function decodeBrowserImageLevels(
       decodedHeight: height,
     };
   }
-  const type = firmwareRasterImageType(bytes, mediaType);
+  const type = firmwareRasterImageType(archivePath);
   if (type === 'unknown' || type === 'xtg') return null;
   if (type === 'bmp') {
     const levels = decodeFirmwareBmpLevels(
@@ -1398,6 +1401,29 @@ async function decodeBrowserImageLevels(
       ? {
           levels,
           rasterModel: 'bmp-v6315' as const,
+          decodedWidth: width,
+          decodedHeight: height,
+        }
+      : null;
+  }
+  if (type === 'png') {
+    const decoded = decodeV6315Png(bytes);
+    if (
+      !decoded ||
+      decoded.width !== sourceWidth ||
+      decoded.height !== sourceHeight
+    ) return null;
+    const levels = decodeFirmwarePngLevels(
+      decoded,
+      maximumWidth,
+      maximumHeight,
+      width,
+      height,
+    );
+    return levels
+      ? {
+          levels,
+          rasterModel: 'png-v6315' as const,
           decodedWidth: width,
           decodedHeight: height,
         }
@@ -1476,25 +1502,6 @@ async function decodeBrowserImageLevels(
     context.imageSmoothingEnabled = false;
     context.drawImage(bitmap, 0, 0, sourceWidth, sourceHeight);
     const rgba = context.getImageData(0, 0, sourceWidth, sourceHeight).data;
-    if (type === 'png') {
-      const levels = decodeFirmwarePngLevels(
-        rgba,
-        sourceWidth,
-        sourceHeight,
-        maximumWidth,
-        maximumHeight,
-        width,
-        height,
-      );
-      return levels
-        ? {
-            levels,
-            rasterModel: 'png-v6315' as const,
-            decodedWidth: width,
-            decodedHeight: height,
-          }
-        : null;
-    }
     const ditherPhaseStart = jpegDitherState.phase;
     const luminance = decodeFirmwareJpegModelLuminance(
       rgba,
@@ -1527,30 +1534,382 @@ async function decodeBrowserImageLevels(
 
 type FirmwareRasterImageType = 'xtg' | 'png' | 'bmp' | 'jpeg' | 'unknown';
 
-function firmwareRasterImageType(
-  bytes: Uint8Array,
-  mediaType: string,
+export function firmwareRasterImageType(
+  archivePath: string,
 ): FirmwareRasterImageType {
-  if (
-    bytes.length >= 4 &&
-    bytes[0] === 0x58 &&
-    bytes[1] === 0x54 &&
-    bytes[2] === 0x47 &&
-    bytes[3] === 0x00
-  ) return 'xtg';
-  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) return 'bmp';
-  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png';
-  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return 'jpeg';
-  if (/png/i.test(mediaType)) return 'png';
-  if (/bmp/i.test(mediaType)) return 'bmp';
-  if (/jpe?g/i.test(mediaType)) return 'jpeg';
-  if (/xtg/i.test(mediaType)) return 'xtg';
+  // FUN_420605ae scans backward for the final dot, copies at most 15 extension
+  // bytes, lowercases ASCII A-Z, and dispatches by that extension. It does not
+  // sniff file magic or consult the EPUB manifest media type.
+  const dot = archivePath.lastIndexOf('.');
+  if (dot < 0) return 'unknown';
+  const extension = archivePath.slice(dot + 1, dot + 16).replace(
+    /[A-Z]/g,
+    (character) => character.toLowerCase(),
+  );
+  if (extension === 'xtg') return 'xtg';
+  if (extension === 'png') return 'png';
+  if (extension === 'bmp') return 'bmp';
+  if (extension === 'jpg' || extension === 'jpeg') return 'jpeg';
   return 'unknown';
+}
+
+export type DecodedV6315Png = {
+  width: number;
+  height: number;
+  depth: 1 | 2 | 4 | 8 | 16;
+  colorType: 0 | 2 | 3 | 4 | 6;
+  interlaced: boolean;
+  rgba: Uint8ClampedArray;
+};
+
+const V6315_PNG_SIGNATURE = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+]);
+// These are the exact eight-entry tables at ELF 0x3c27b5d0...0x3c27b64f.
+// Pass 0 is the non-interlaced walk; passes 1...7 are Adam7.
+const V6315_PNG_PASS_X_STEP = [1, 8, 8, 4, 4, 2, 2, 1] as const;
+const V6315_PNG_PASS_Y_STEP = [1, 8, 8, 8, 4, 4, 2, 2] as const;
+const V6315_PNG_PASS_X_START = [0, 0, 4, 0, 2, 0, 1, 0] as const;
+const V6315_PNG_PASS_Y_START = [0, 0, 0, 4, 0, 2, 0, 1] as const;
+
+export function decodeV6315Png(bytes: Uint8Array): DecodedV6315Png | null {
+  // FUN_420cd5c2 feeds the file to the pngle-compatible implementation at
+  // FUN_42040df0. Decode the same bytes directly so browser PNG color
+  // management, gamma policy, and permissive format handling cannot alter the
+  // source samples handed to the recovered row callbacks.
+  if (
+    bytes.length < V6315_PNG_SIGNATURE.length ||
+    V6315_PNG_SIGNATURE.some((value, index) => bytes[index] !== value)
+  ) return null;
+
+  let width = 0;
+  let height = 0;
+  let depth: DecodedV6315Png['depth'] | 0 = 0;
+  let colorType: DecodedV6315Png['colorType'] | -1 = -1;
+  let channels = 0;
+  let interlaced = false;
+  let palette: Uint8Array | null = null;
+  let transparency: Uint8Array | null = null;
+  let seenHeader = false;
+  let seenImageData = false;
+  let seenEnd = false;
+  const imageDataParts: Uint8Array[] = [];
+  let cursor = V6315_PNG_SIGNATURE.length;
+
+  while (!seenEnd && cursor + 12 <= bytes.length) {
+    const length = readFirmwarePngU32(bytes, cursor);
+    if (length > bytes.length - cursor - 12) return null;
+    const typeOffset = cursor + 4;
+    const dataOffset = cursor + 8;
+    const crcOffset = dataOffset + length;
+    const type = String.fromCharCode(
+      bytes[typeOffset],
+      bytes[typeOffset + 1],
+      bytes[typeOffset + 2],
+      bytes[typeOffset + 3],
+    );
+    if (
+      readFirmwarePngU32(bytes, crcOffset) !==
+      firmwarePngCrc32(bytes, typeOffset, length + 4)
+    ) return null;
+    const data = bytes.subarray(dataOffset, crcOffset);
+    cursor = crcOffset + 4;
+
+    if (type === 'IHDR') {
+      if (length !== 13 || seenHeader) return null;
+      width = readFirmwarePngU32(data, 0);
+      height = readFirmwarePngU32(data, 4);
+      const rawDepth = data[8];
+      const rawColorType = data[9];
+      if (width < 1 || height < 1 || width > 0x400 || height > 0x400) {
+        return null;
+      }
+      if (rawColorType === 0 && [1, 2, 4, 8, 16].includes(rawDepth)) {
+        channels = 1;
+      } else if (rawColorType === 2 && [8, 16].includes(rawDepth)) {
+        channels = 3;
+      } else if (rawColorType === 3 && [1, 2, 4, 8].includes(rawDepth)) {
+        channels = 1;
+      } else if (rawColorType === 4 && [8, 16].includes(rawDepth)) {
+        channels = 2;
+      } else if (rawColorType === 6 && [8, 16].includes(rawDepth)) {
+        channels = 4;
+      } else {
+        return null;
+      }
+      if (data[10] !== 0 || data[11] !== 0) return null;
+      depth = rawDepth as DecodedV6315Png['depth'];
+      colorType = rawColorType as DecodedV6315Png['colorType'];
+      // FUN_420409de receives `interlace != 0`; the build does not reject
+      // non-zero values other than one.
+      interlaced = data[12] !== 0;
+      seenHeader = true;
+      continue;
+    }
+
+    if (type === 'PLTE') {
+      if (
+        !seenHeader ||
+        seenImageData ||
+        palette ||
+        length === 0 ||
+        length % 3 !== 0 ||
+        !([2, 3, 6] as number[]).includes(colorType)
+      ) return null;
+      const maximumEntries = Math.min(0x100, 1 << depth);
+      if (length / 3 > maximumEntries) return null;
+      palette = data.slice();
+      continue;
+    }
+
+    if (type === 'tRNS') {
+      if (!seenHeader || seenImageData || transparency || length === 0) {
+        return null;
+      }
+      if (
+        (colorType === 0 && length !== 2) ||
+        (colorType === 2 && length !== 6) ||
+        (colorType === 3 && length > 1 << depth) ||
+        (colorType !== 0 && colorType !== 2 && colorType !== 3)
+      ) return null;
+      transparency = data.slice();
+      continue;
+    }
+
+    if (type === 'IDAT') {
+      if (!seenHeader || length === 0 || (colorType === 3 && !palette)) {
+        return null;
+      }
+      seenImageData = true;
+      imageDataParts.push(data.slice());
+      continue;
+    }
+
+    if (type === 'IEND') {
+      if (!seenImageData || length !== 0) return null;
+      seenEnd = true;
+      continue;
+    }
+
+    if ((type === 'gAMA' || type === 'bKGD') && !seenHeader) return null;
+    // gAMA is intentionally ignored. FUN_42040d56 calloc-initializes the
+    // pngle context and the active wrapper never calls a display-gamma setter,
+    // so setup_gamma_table exits before allocating or transforming samples.
+    // bKGD is parsed by pngle but the active EPUB callback blends alpha against
+    // its own fixed white background instead of this ancillary value.
+  }
+
+  if (
+    !seenHeader ||
+    !seenImageData ||
+    !seenEnd ||
+    !depth ||
+    colorType < 0 ||
+    channels < 1
+  ) return null;
+
+  let inflated: Uint8Array;
+  try {
+    const compressedLength = imageDataParts.reduce(
+      (total, part) => total + part.length,
+      0,
+    );
+    const compressed = new Uint8Array(compressedLength);
+    let compressedOffset = 0;
+    for (const part of imageDataParts) {
+      compressed.set(part, compressedOffset);
+      compressedOffset += part.length;
+    }
+    inflated = unzlibSync(compressed);
+  } catch {
+    return null;
+  }
+
+  const rgba = new Uint8ClampedArray(width * height * 4);
+  const maximumSample = colorType === 3 ? 0xff : (1 << depth) - 1;
+  const firstPass = interlaced ? 1 : 0;
+  const lastPass = interlaced ? 7 : 0;
+  let inflatedOffset = 0;
+
+  for (let pass = firstPass; pass <= lastPass; pass += 1) {
+    const startX = V6315_PNG_PASS_X_START[pass];
+    const startY = V6315_PNG_PASS_Y_START[pass];
+    const stepX = V6315_PNG_PASS_X_STEP[pass];
+    const stepY = V6315_PNG_PASS_Y_STEP[pass];
+    const passWidth = width <= startX
+      ? 0
+      : Math.ceil((width - startX) / stepX);
+    const passHeight = height <= startY
+      ? 0
+      : Math.ceil((height - startY) / stepY);
+    if (!passWidth || !passHeight) continue;
+    const rowBytes = Math.ceil((passWidth * channels * depth) / 8);
+    const bytesPerPixel = Math.ceil((channels * depth) / 8);
+    let previous = new Uint8Array(rowBytes);
+
+    for (let passY = 0; passY < passHeight; passY += 1) {
+      if (inflatedOffset + 1 + rowBytes > inflated.length) return null;
+      const filter = inflated[inflatedOffset++];
+      if (filter > 4) return null;
+      const filtered = inflated.subarray(
+        inflatedOffset,
+        inflatedOffset + rowBytes,
+      );
+      inflatedOffset += rowBytes;
+      const reconstructed = new Uint8Array(rowBytes);
+      for (let index = 0; index < rowBytes; index += 1) {
+        const left = index >= bytesPerPixel
+          ? reconstructed[index - bytesPerPixel]
+          : 0;
+        const above = previous[index];
+        const upperLeft = index >= bytesPerPixel
+          ? previous[index - bytesPerPixel]
+          : 0;
+        let predictor = 0;
+        if (filter === 1) predictor = left;
+        else if (filter === 2) predictor = above;
+        else if (filter === 3) predictor = (left + above) >> 1;
+        else if (filter === 4) predictor = firmwarePngPaeth(
+          left,
+          above,
+          upperLeft,
+        );
+        reconstructed[index] = (filtered[index] + predictor) & 0xff;
+      }
+
+      let bitOffset = 0;
+      for (let passX = 0; passX < passWidth; passX += 1) {
+        const samples = new Uint16Array(4);
+        for (let channel = 0; channel < channels; channel += 1) {
+          if (depth === 16) {
+            const byteOffset = bitOffset >> 3;
+            samples[channel] =
+              (reconstructed[byteOffset] << 8) |
+              reconstructed[byteOffset + 1];
+          } else if (depth === 8) {
+            samples[channel] = reconstructed[bitOffset >> 3];
+          } else {
+            const shift = 8 - depth - (bitOffset & 7);
+            samples[channel] =
+              (reconstructed[bitOffset >> 3] >> shift) & maximumSample;
+          }
+          bitOffset += depth;
+        }
+
+        let red: number;
+        let green: number;
+        let blue: number;
+        let alpha: number;
+        if (colorType === 3) {
+          const paletteIndex = samples[0];
+          if (!palette || paletteIndex >= palette.length / 3) return null;
+          red = palette[paletteIndex * 3];
+          green = palette[paletteIndex * 3 + 1];
+          blue = palette[paletteIndex * 3 + 2];
+          alpha = transparency && paletteIndex < transparency.length
+            ? transparency[paletteIndex]
+            : 0xff;
+        } else if (colorType === 0 || colorType === 4) {
+          red = samples[0];
+          green = samples[0];
+          blue = samples[0];
+          alpha = colorType === 4
+            ? samples[1]
+            : transparency && samples[0] === readFirmwarePngU16(transparency, 0)
+              ? 0
+              : maximumSample;
+        } else {
+          red = samples[0];
+          green = samples[1];
+          blue = samples[2];
+          alpha = colorType === 6
+            ? samples[3]
+            : transparency &&
+                samples[0] === readFirmwarePngU16(transparency, 0) &&
+                samples[1] === readFirmwarePngU16(transparency, 2) &&
+                samples[2] === readFirmwarePngU16(transparency, 4)
+              ? 0
+              : maximumSample;
+        }
+
+        const x = startX + passX * stepX;
+        const y = startY + passY * stepY;
+        const target = (y * width + x) * 4;
+        const rounding = maximumSample >> 1;
+        rgba[target] = Math.trunc((red * 0xff + rounding) / maximumSample);
+        rgba[target + 1] = Math.trunc(
+          (green * 0xff + rounding) / maximumSample,
+        );
+        rgba[target + 2] = Math.trunc(
+          (blue * 0xff + rounding) / maximumSample,
+        );
+        rgba[target + 3] = Math.trunc(
+          (alpha * 0xff + rounding) / maximumSample,
+        );
+      }
+      previous = reconstructed;
+    }
+  }
+
+  return {
+    width,
+    height,
+    depth,
+    colorType: colorType as DecodedV6315Png['colorType'],
+    interlaced,
+    rgba,
+  };
+}
+
+function readFirmwarePngU32(bytes: Uint8Array, offset: number) {
+  return (
+    bytes[offset] * 0x1000000 +
+    (bytes[offset + 1] << 16) +
+    (bytes[offset + 2] << 8) +
+    bytes[offset + 3]
+  ) >>> 0;
+}
+
+function readFirmwarePngU16(bytes: Uint8Array, offset: number) {
+  return (bytes[offset] << 8) | bytes[offset + 1];
+}
+
+let firmwarePngCrcTable: Uint32Array | null = null;
+
+function firmwarePngCrc32(bytes: Uint8Array, offset: number, length: number) {
+  if (!firmwarePngCrcTable) {
+    firmwarePngCrcTable = new Uint32Array(0x100);
+    for (let index = 0; index < 0x100; index += 1) {
+      let value = index;
+      for (let bit = 0; bit < 8; bit += 1) {
+        value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+      }
+      firmwarePngCrcTable[index] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  const end = offset + length;
+  for (let index = offset; index < end; index += 1) {
+    crc = firmwarePngCrcTable[(crc ^ bytes[index]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function firmwarePngPaeth(left: number, above: number, upperLeft: number) {
+  const estimate = left + above - upperLeft;
+  const leftDistance = Math.abs(estimate - left);
+  const aboveDistance = Math.abs(estimate - above);
+  const upperLeftDistance = Math.abs(estimate - upperLeft);
+  if (leftDistance <= aboveDistance && leftDistance <= upperLeftDistance) {
+    return left;
+  }
+  return aboveDistance <= upperLeftDistance ? above : upperLeft;
 }
 
 function firmwarePngLuminance(
   rgba: Uint8ClampedArray,
   pixelIndex: number,
+  hasNativeAlpha: boolean,
 ) {
   const offset = pixelIndex * 4;
   const alpha = rgba[offset + 3];
@@ -1559,7 +1918,7 @@ function firmwarePngLuminance(
   let blue = rgba[offset + 2];
   // The active EPUB call disables alpha skipping and selects the
   // FUN_42053846 white-background blend.
-  if (alpha !== 255) {
+  if (hasNativeAlpha && alpha !== 255) {
     const white = (255 - alpha) * 255;
     red = (red * alpha + white) >> 8;
     green = (green * alpha + white) >> 8;
@@ -1581,15 +1940,20 @@ function firmwareOpaqueLuminance(
   );
 }
 
-function decodeFirmwarePngLevels(
-  rgba: Uint8ClampedArray,
-  sourceWidth: number,
-  sourceHeight: number,
+export function decodeFirmwarePngLevels(
+  decoded: DecodedV6315Png,
   maximumWidth: number,
   maximumHeight: number,
   cacheWidth: number,
   cacheHeight: number,
 ) {
+  const {
+    rgba,
+    width: sourceWidth,
+    height: sourceHeight,
+    colorType,
+    interlaced,
+  } = decoded;
   const widthRatio = Math.trunc((maximumWidth * 0x10000) / sourceWidth);
   const heightRatio = Math.trunc((maximumHeight * 0x10000) / sourceHeight);
   let ratio = Math.min(widthRatio, heightRatio);
@@ -1604,57 +1968,127 @@ function decodeFirmwarePngLevels(
   );
   if (drawWidth < 1 || drawHeight < 1) return null;
 
-  const sums = new Uint32Array(drawWidth * drawHeight);
-  const counts = new Uint32Array(drawWidth * drawHeight);
-  for (let sourceY = 0; sourceY < sourceHeight; sourceY += 1) {
-    const targetY = Math.trunc((sourceY * ratio) / 0x10000);
-    if (targetY >= drawHeight) continue;
-    for (let sourceX = 0; sourceX < sourceWidth; sourceX += 1) {
-      const targetX = Math.trunc((sourceX * ratio) / 0x10000);
-      if (targetX >= drawWidth) continue;
-      const targetIndex = targetY * drawWidth + targetX;
-      sums[targetIndex] += firmwarePngLuminance(
-        rgba,
-        sourceY * sourceWidth + sourceX,
-      );
-      counts[targetIndex] += 1;
-    }
-  }
-  const luminance = new Uint8Array(drawWidth * drawHeight);
-  for (let index = 0; index < luminance.length; index += 1) {
-    const count = counts[index];
-    if (!count) {
-      luminance[index] = 255;
-      continue;
-    }
-    const reciprocal = Math.trunc((0x10000 + (count >> 1)) / count);
-    luminance[index] = Math.min(255, (sums[index] * reciprocal) >> 16);
-  }
-
   const drawOriginX = Math.trunc((maximumWidth - drawWidth) / 2);
   const drawOriginY = Math.trunc((maximumHeight - drawHeight) / 2);
   const cacheOriginX = Math.trunc((maximumWidth - cacheWidth) / 2);
   const cacheOriginY = Math.trunc((maximumHeight - cacheHeight) / 2);
-  const offsetX = drawOriginX - cacheOriginX;
-  const offsetY = drawOriginY - cacheOriginY;
-  const dithered = ditherFirmwareOneBit(
-    luminance,
-    drawWidth,
-    drawHeight,
-    'xy',
-    drawOriginX,
-    drawOriginY,
-  );
   const levels = new Uint8Array(cacheWidth * cacheHeight);
-  for (let y = 0; y < drawHeight; y += 1) {
-    const targetY = y + offsetY;
-    if (targetY < 0 || targetY >= cacheHeight) continue;
-    for (let x = 0; x < drawWidth; x += 1) {
-      const targetX = x + offsetX;
-      if (targetX < 0 || targetX >= cacheWidth) continue;
-      levels[targetY * cacheWidth + targetX] = dithered[y * drawWidth + x];
+  let currentErrors = new Int16Array(drawWidth + 2);
+  let nextErrors = new Int16Array(drawWidth + 2);
+  let currentSourceY = -1;
+  const scaled = ratio !== 0x10000;
+  const hasNativeAlpha = colorType === 4 || colorType === 6;
+  let pendingTargetX = -1;
+  let pendingTargetY = -1;
+  let pendingErrorX = -1;
+  let pendingSum = 0;
+  let pendingCount = 0;
+
+  const paint = (targetX: number, targetY: number, black: boolean) => {
+    const x = targetX - cacheOriginX;
+    const y = targetY - cacheOriginY;
+    if (x < 0 || y < 0 || x >= cacheWidth || y >= cacheHeight) return;
+    levels[y * cacheWidth + x] = black ? 3 : 0;
+  };
+
+  const quantize = (
+    luminance: number,
+    errorX: number,
+    targetX: number,
+    targetY: number,
+  ) => {
+    let adjusted = toFirmwareInt16(currentErrors[errorX] + luminance);
+    if (adjusted < 10) adjusted = 0;
+    else if (adjusted > 245) adjusted = 255;
+    const white = adjusted > 119 + ((targetX + targetY) & 15);
+    paint(targetX, targetY, !white);
+    const error = toFirmwareInt16(adjusted - (white ? 255 : 0));
+    if (error === 0) return;
+    const unit = toFirmwareInt16((error - (error >> 3)) >> 2);
+    if (errorX < drawWidth + 1) {
+      currentErrors[errorX + 1] = toFirmwareInt16(
+        currentErrors[errorX + 1] + unit * 2,
+      );
+    }
+    if (errorX > 0) {
+      nextErrors[errorX - 1] = toFirmwareInt16(
+        nextErrors[errorX - 1] + unit,
+      );
+    }
+    nextErrors[errorX] = toFirmwareInt16(nextErrors[errorX] + unit);
+  };
+
+  const flushPending = () => {
+    if (!pendingCount) return;
+    const reciprocal = Math.trunc(
+      (0x10000 + (pendingCount >> 1)) / pendingCount,
+    );
+    const luminance = (pendingSum * reciprocal) >> 16 & 0xff;
+    quantize(luminance, pendingErrorX, pendingTargetX, pendingTargetY);
+    pendingCount = 0;
+  };
+
+  const processSample = (sourceX: number, sourceY: number) => {
+    if (currentSourceY !== sourceY) {
+      if (scaled) flushPending();
+      currentErrors.fill(0);
+      const cleared = currentErrors;
+      currentErrors = nextErrors;
+      nextErrors = cleared;
+      currentSourceY = sourceY;
+    }
+    const relativeX = scaled
+      ? Math.trunc((sourceX * ratio) / 0x10000)
+      : sourceX;
+    const relativeY = scaled
+      ? Math.trunc((sourceY * ratio) / 0x10000)
+      : sourceY;
+    const targetX = drawOriginX + relativeX;
+    const targetY = drawOriginY + relativeY;
+    if (
+      targetX < 0 ||
+      targetY < 0 ||
+      targetX >= maximumWidth ||
+      targetY >= maximumHeight ||
+      relativeX >= drawWidth ||
+      relativeY >= drawHeight
+    ) return;
+    const luminance = firmwarePngLuminance(
+      rgba,
+      sourceY * sourceWidth + sourceX,
+      hasNativeAlpha,
+    );
+    if (!scaled) {
+      quantize(luminance, sourceX, targetX, targetY);
+      return;
+    }
+    if (pendingCount && pendingTargetX !== targetX) flushPending();
+    if (!pendingCount || pendingTargetX !== targetX) {
+      pendingTargetX = targetX;
+      pendingTargetY = targetY;
+      pendingErrorX = relativeX;
+      pendingSum = luminance;
+      pendingCount = 1;
+    } else {
+      pendingSum += luminance;
+      pendingCount += 1;
+    }
+  };
+
+  const firstPass = interlaced ? 1 : 0;
+  const lastPass = interlaced ? 7 : 0;
+  for (let pass = firstPass; pass <= lastPass; pass += 1) {
+    const startX = V6315_PNG_PASS_X_START[pass];
+    const startY = V6315_PNG_PASS_Y_START[pass];
+    const stepX = V6315_PNG_PASS_X_STEP[pass];
+    const stepY = V6315_PNG_PASS_Y_STEP[pass];
+    for (let y = startY; y < sourceHeight; y += stepY) {
+      for (let x = startX; x < sourceWidth; x += stepX) {
+        processSample(x, y);
+      }
     }
   }
+  if (scaled) flushPending();
   return levels;
 }
 

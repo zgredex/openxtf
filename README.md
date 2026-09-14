@@ -1,8 +1,13 @@
 # OpenXTF
 
-OpenXTF is a browser-local XT font builder. It preserves the compatible XTF
-and legacy BIN serializers while adding a Korean-first profile and a device
-preview derived from the X4 V6.3.15 rendering path.
+OpenXTF is a browser-local XT font builder. Standard XTFont mode follows the
+current official XTFont Maker defaults, hidden per-font tuning, automatic
+measurement and serialization. OpenXTF then previews the completed XTF through
+the decompiled X4 V6.3.15 rendering path instead of treating the converter's
+generic canvas preview as device firmware.
+
+The separate Korean reading profile applies its documented fixed XTF metrics
+after official rasterization. It remains the default profile.
 
 Korean is the default interface language. English is available from the
 language switch in the header, and an explicit choice is remembered locally in
