@@ -340,6 +340,127 @@ try {
   assert.equal(left.device.lines[0].placementBranch, 'direct');
   assert.equal(left.device.lines[0].justificationPixels, 0);
 
+  const noIndentBlock = (text, documentLanguage = 'ko') => ({
+    blocks: [{
+      text,
+      tag: 'p',
+      className: '',
+      breakAfter: 'text-end',
+      startsParagraph: false,
+      suppressIndent: true,
+    }],
+    documentLanguage,
+    layout: {
+      lineSpacing: 1.2,
+      paragraphRatio: 1.5,
+      indentChars: 2,
+      alignMode: 'wrap-align',
+    },
+  });
+
+  // ComposePageRecordsV6315 splits only when the next unit is strictly wider
+  // than the record. This first record is exactly 446 px and remains intact.
+  const exactWidth = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一 '.repeat(6)}${'一'.repeat(9)}`),
+  );
+  assert.equal(exactWidth.device.lines[0].layoutWidth, 446);
+  assert.equal(exactWidth.device.lines[0].baseWidth, 446);
+  assert.equal(exactWidth.device.lines[0].breakReason, 'automatic');
+  assert.equal(exactWidth.device.lines[0].placementBranch, 'direct');
+  assert.equal(exactWidth.device.lines[0].placementBypassReason, 'no-adjustment');
+
+  // PaintPageTextV6315 sets a sticky CJK-state flag for ideographs but not
+  // ordinary Hangul. The CJK branch distributes integer remainder pixels at
+  // its wide-character boundaries, including its final counted boundary.
+  const cjkDistributed = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock('一'.repeat(16)),
+  );
+  assert.equal(cjkDistributed.device.lines[0].text, '一'.repeat(15));
+  assert.equal(cjkDistributed.device.lines[0].placementBranch, 'cjk-distribution');
+  assert.equal(cjkDistributed.device.lines[0].preJustifyWidth, 420);
+  assert.equal(cjkDistributed.device.lines[0].justificationPixels, 26);
+  assert.equal(cjkDistributed.device.lines[0].usedWidth, 446);
+
+  const cjkSingleTrailingAscii = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一'.repeat(15)}A一`),
+  );
+  assert.equal(cjkSingleTrailingAscii.device.lines[0].text, `${'一'.repeat(15)}A`);
+  assert.equal(cjkSingleTrailingAscii.device.lines[0].placementBranch, 'direct');
+  assert.equal(
+    cjkSingleTrailingAscii.device.lines[0].placementBypassReason,
+    'single-trailing-ascii',
+  );
+
+  const cjkTwoTrailingAscii = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一'.repeat(15)}AB一`),
+  );
+  assert.equal(cjkTwoTrailingAscii.device.lines[0].placementBranch, 'cjk-distribution');
+  assert.equal(cjkTwoTrailingAscii.device.lines[0].trailingAsciiReservePixels, 2);
+  assert.equal(cjkTwoTrailingAscii.device.lines[0].justificationPixels, 4);
+  assert.equal(cjkTwoTrailingAscii.device.lines[0].usedWidth, 444);
+
+  // NBSP is measured as U+0020 by the composer but serialized as byte 0x07
+  // and painted at asciiWidth. The second painter-width gate backs up one
+  // complete token even while the splitter width would still fit.
+  const nbspRefit = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一'.repeat(13)}${'\u00a0'.repeat(9)}`),
+  );
+  assert.equal(nbspRefit.device.lines[0].text, `${'一'.repeat(13)}${'\u00a0'.repeat(8)}`);
+  assert.equal(nbspRefit.device.lines[0].layoutWidth, 436);
+  assert.equal(nbspRefit.device.lines[0].baseWidth, 444);
+  assert.equal(nbspRefit.device.lines[0].preJustifyWidth, 444);
+
+  // FUN_42070062/420700f0 carry prohibited line-start punctuation, while
+  // FUN_4207005a moves an opening mark off the previous record.
+  const closingCarry = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一'.repeat(15)}、一`),
+  );
+  assert.equal(closingCarry.device.lines[0].text, `${'一'.repeat(15)}、`);
+  assert.equal(closingCarry.device.lines[0].layoutWidth, 448);
+  assert.equal(closingCarry.device.lines[0].justificationPixels, -2);
+  assert.equal(closingCarry.device.lines[0].usedWidth, 446);
+
+  const openingCarry = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'一'.repeat(14)}〈一`),
+  );
+  assert.equal(openingCarry.device.lines[0].text, '一'.repeat(14));
+  assert.ok(openingCarry.device.lines[1].text.startsWith('〈'));
+
+  // The composer uses only the final point returned by the selected packed
+  // dictionary and inserts one visible ASCII hyphen when that candidate fits.
+  const dictionaryBreak = await renderXtfDevicePreview(
+    xtf,
+    '',
+    29,
+    noIndentBlock(`${'A'.repeat(32)} representation`, 'en'),
+  );
+  assert.equal(
+    dictionaryBreak.device.lines[0].text,
+    `${'A'.repeat(32)} representa-`,
+  );
+  assert.equal(dictionaryBreak.device.lines[0].breakReason, 'automatic');
+
   const explicitEndings = await renderXtfDevicePreview(xtf, '', 29, {
     blocks: [
       {

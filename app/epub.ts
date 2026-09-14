@@ -519,7 +519,7 @@ function appendInlineRun(
   }
 }
 
-function normalizeFirmwareInlineRuns(runs: EpubInlineRun[]) {
+export function normalizeFirmwareInlineRuns(runs: EpubInlineRun[]) {
   // ELF 0x420d7794 collapses only ASCII TAB, LF, CR, and SPACE into an ordinary
   // whitespace token. Form feed and vertical tab stay literal one-byte input;
   // browser/HTML `\s` rules would silently discard behavior the firmware
